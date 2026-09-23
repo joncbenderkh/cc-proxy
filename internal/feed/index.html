@@ -54,7 +54,7 @@ main { max-width: 760px; margin: 0 auto; padding: 12px 16px 48px; }
 .result.error { border-left: 3px solid var(--bad); }
 details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 #empty { color: var(--muted); text-align: center; margin-top: 40px; }
-#approvals { position: sticky; bottom: 0; padding-bottom: env(safe-area-inset-bottom); }
+#dock { position: sticky; bottom: 0; padding-bottom: env(safe-area-inset-bottom); }
 .approval {
   background: var(--surface); border: 2px solid var(--accent); border-radius: 10px;
   padding: 10px 12px; margin-top: 12px; overflow-wrap: anywhere;
@@ -69,7 +69,15 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 .actions .allow { background: var(--ok); border-color: var(--ok); color: #fff; }
 .actions .deny { color: var(--bad); }
 .actions button:disabled { opacity: 0.5; }
-.approval .err { color: var(--bad); font-size: 13px; margin-top: 6px; }
+.approval .err, #composer .err { color: var(--bad); font-size: 13px; margin-top: 6px; }
+#composer {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  padding: 10px 12px; margin-top: 12px; box-shadow: 0 -4px 16px rgb(0 0 0 / 0.1);
+}
+#composer textarea {
+  display: block; width: 100%; margin-top: 8px; resize: vertical; font: inherit;
+  color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px;
+}
 </style>
 </head>
 <body>
@@ -82,7 +90,15 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 <main>
   <p id="empty">Waiting for Claude Code traffic…</p>
   <div id="turns"></div>
-  <section id="approvals" aria-live="assertive"></section>
+  <div id="dock">
+    <section id="approvals" aria-live="assertive"></section>
+    <form id="composer" hidden>
+      <div class="meta"><span>Claude is waiting for your next prompt</span><span id="composer-cwd"></span></div>
+      <textarea id="prompt" rows="3" placeholder="Next prompt" aria-label="Next prompt" required></textarea>
+      <div class="actions"><button class="allow" type="submit">Send</button></div>
+      <div class="err"></div>
+    </form>
+  </div>
 </main>
 <script>
 "use strict";
@@ -95,6 +111,9 @@ const dot = document.getElementById("dot");
 const FOLD = 600;
 const approvals = document.getElementById("approvals");
 const seenApprovals = new Set();
+const composer = document.getElementById("composer");
+const promptBox = document.getElementById("prompt");
+let idle = [];
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -173,6 +192,35 @@ function redraw() {
   const cost = shown.reduce((sum, turn) => sum + ((turn.message && turn.message.cost_usd) || 0), 0);
   total.textContent = shown.length ? usd(cost) : "";
   document.getElementById("empty").hidden = shown.length > 0;
+  showComposer();
+}
+
+function showComposer() {
+  const waiting = idle.find(session => session.session_id === selectedSession());
+  composer.hidden = !waiting;
+  document.getElementById("composer-cwd").textContent = waiting ? waiting.cwd || "" : "";
+}
+
+async function sendPrompt(event) {
+  event.preventDefault();
+  const session = selectedSession();
+  const button = composer.querySelector("button");
+  const error = composer.querySelector(".err");
+  button.disabled = true;
+  error.textContent = "";
+  try {
+    const response = await fetch("prompts/" + encodeURIComponent(session), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: promptBox.value }),
+    });
+    if (!response.ok) throw new Error((await response.text()).trim() || "HTTP " + response.status);
+    promptBox.value = "";
+  } catch (failure) {
+    error.textContent = failure.message;
+  } finally {
+    button.disabled = false;
+  }
 }
 
 function track(turn) {
@@ -241,12 +289,21 @@ function showApprovals(pending) {
 }
 
 picker.addEventListener("change", redraw);
+composer.addEventListener("submit", sendPrompt);
+promptBox.addEventListener("keydown", event => {
+  if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) composer.requestSubmit();
+});
 
 const nearBottom = () => window.innerHeight + window.scrollY >= document.body.scrollHeight - 80;
 const events = new EventSource("events");
 events.onopen = () => { dot.className = "live"; dot.title = "live"; };
 events.onerror = () => { dot.className = ""; dot.title = "reconnecting"; };
 events.addEventListener("approvals", event => showApprovals(JSON.parse(event.data)));
+events.addEventListener("idle", event => {
+  idle = JSON.parse(event.data);
+  idle.forEach(track);
+  showComposer();
+});
 events.addEventListener("turn", event => {
   const follow = nearBottom();
   const turn = JSON.parse(event.data);

@@ -34,6 +34,7 @@ import (
 	"github.com/joncbenderkh/cc-proxy/internal/approval"
 	"github.com/joncbenderkh/cc-proxy/internal/auth"
 	"github.com/joncbenderkh/cc-proxy/internal/feed"
+	"github.com/joncbenderkh/cc-proxy/internal/prompt"
 	"github.com/joncbenderkh/cc-proxy/internal/proxy"
 )
 
@@ -48,6 +49,9 @@ func main() {
 	defer stop()
 	if err := newRootCommand().ExecuteContext(ctx); err != nil {
 		stop()
+		if errors.Is(err, errWakeClaude) {
+			os.Exit(wakeExitCode)
+		}
 		os.Exit(1)
 	}
 }
@@ -87,6 +91,7 @@ func newRootCommand() *cobra.Command {
 		},
 	}
 	cmd.SetVersionTemplate("cc-proxy {{.Version}}\n")
+	cmd.AddCommand(newHookCommand())
 	cmd.Flags().StringVar(&listen, "listen", "127.0.0.1:8787", "address to listen on (host:port)")
 	cmd.Flags().StringVar(&uiListen, "ui-listen", "", "serve the live feed web page on this loopback address (host:port); off when empty")
 	cmd.Flags().StringVar(&uiTokenFile, "ui-token-file", "", "file holding the web page login token, created if missing (default <user config dir>/cc-proxy/ui-token)")
@@ -220,8 +225,9 @@ func serve(ctx context.Context, listen, uiListen, uiToken string, upstream *url.
 		mux := http.NewServeMux()
 		mux.Handle("/", hub.Handler())
 		broker.Register(mux)
-		// Canceling the base context on shutdown releases held permission
-		// hooks, which hands their prompts back to the terminal.
+		prompt.NewInbox(func(idle []prompt.Idle) { hub.SetState("idle", idle) }, logger).Register(mux)
+		// Canceling the base context on shutdown releases held hooks, which
+		// hands permission prompts back to the terminal.
 		uiCtx, cancelUI := context.WithCancel(context.Background())
 		ui := &http.Server{
 			Addr:              uiListen,

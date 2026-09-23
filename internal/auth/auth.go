@@ -41,7 +41,7 @@ func DefaultTokenFile() (string, error) {
 // LoadOrCreateToken reads the token at path, generating and storing a new
 // one when the file does not exist yet.
 func LoadOrCreateToken(path string) (token string, created bool, err error) {
-	token, err = readToken(path)
+	token, err = LoadToken(path)
 	if !errors.Is(err, fs.ErrNotExist) {
 		return token, false, err
 	}
@@ -60,7 +60,9 @@ func LoadOrCreateToken(path string) (token string, created bool, err error) {
 	return token, true, file.Close()
 }
 
-func readToken(path string) (string, error) {
+// LoadToken reads the token at path, refusing a file other users can
+// access or a token too short to be safe.
+func LoadToken(path string) (string, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return "", err
