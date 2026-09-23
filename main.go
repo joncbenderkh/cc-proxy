@@ -260,7 +260,7 @@ func serve(ctx context.Context, listen, uiListen, uiToken string, turns *history
 		if turns != nil {
 			hub.Restore(turns.Turns())
 		}
-		broker := approval.NewBroker(hub.Viewers, func(pending []approval.Request) { hub.SetState("approvals", pending) }, logger)
+		broker := approval.NewBroker(func(pending []approval.Request) { hub.SetState("approvals", pending) }, logger)
 		mux := http.NewServeMux()
 		mux.Handle("/", hub.Handler())
 		broker.Register(mux)

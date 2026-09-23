@@ -2,8 +2,9 @@
 
 // Package approval lets a remote viewer answer Claude Code permission
 // prompts. A PermissionRequest HTTP hook waits here until a viewer allows
-// or denies the tool call; without a viewer the prompt goes back to the
-// terminal.
+// or denies the tool call. Claude Code shows its terminal dialog at the
+// same time, so whichever answer comes first wins; an answer in the
+// terminal ends the hook request.
 package approval
 
 import (
@@ -44,8 +45,6 @@ const (
 	Allowed       Outcome = "allow"
 	AllowedAlways Outcome = "allow_always"
 	Denied        Outcome = "deny"
-	NoViewer      Outcome = "no_viewer"
-	ViewerLeft    Outcome = "viewer_left"
 	Canceled      Outcome = "canceled"
 )
 
@@ -58,13 +57,8 @@ const DeniedMessage = "The user denied this tool call from the cc-proxy web page
 
 // Broker holds the pending permission prompts.
 type Broker struct {
-	viewers func() int
 	publish func([]Request)
 	logger  *slog.Logger
-	// grace is how long a prompt waits once the last viewer has left, so a
-	// phone that briefly drops its connection keeps the prompt.
-	grace        time.Duration
-	pollInterval time.Duration
 
 	mu      sync.Mutex
 	pending []*waiter
@@ -75,21 +69,16 @@ type waiter struct {
 	decision chan Decision
 }
 
-// NewBroker returns a broker that holds prompts only while viewers()
-// reports a connected viewer, and reports every change to the pending
+// NewBroker returns a broker that reports every change to the pending
 // list through publish.
-func NewBroker(viewers func() int, publish func([]Request), logger *slog.Logger) *Broker {
-	b := &Broker{viewers: viewers, publish: publish, logger: logger, grace: 15 * time.Second, pollInterval: time.Second}
+func NewBroker(publish func([]Request), logger *slog.Logger) *Broker {
+	b := &Broker{publish: publish, logger: logger}
 	b.publishLocked()
 	return b
 }
 
-// Wait holds request until a viewer decides it, every viewer has been gone
-// for the grace period, or ctx ends.
+// Wait holds request until a viewer decides it or ctx ends.
 func (b *Broker) Wait(ctx context.Context, request Request) (Decision, Outcome) {
-	if b.viewers() == 0 {
-		return Decision{}, NoViewer
-	}
 	w := &waiter{request: request, decision: make(chan Decision, 1)}
 	b.mu.Lock()
 	b.pending = append(b.pending, w)
@@ -97,29 +86,18 @@ func (b *Broker) Wait(ctx context.Context, request Request) (Decision, Outcome) 
 	b.mu.Unlock()
 	defer b.remove(w)
 
-	poll := time.NewTicker(b.pollInterval)
-	defer poll.Stop()
-	lastSeen := time.Now()
-	for {
-		select {
-		case d := <-w.decision:
-			switch {
-			case d.Behavior == "deny":
-				return d, Denied
-			case d.Always:
-				return d, AllowedAlways
-			default:
-				return d, Allowed
-			}
-		case <-ctx.Done():
-			return Decision{}, Canceled
-		case now := <-poll.C:
-			if b.viewers() > 0 {
-				lastSeen = now
-			} else if now.Sub(lastSeen) >= b.grace {
-				return Decision{}, ViewerLeft
-			}
+	select {
+	case d := <-w.decision:
+		switch {
+		case d.Behavior == "deny":
+			return d, Denied
+		case d.Always:
+			return d, AllowedAlways
+		default:
+			return d, Allowed
 		}
+	case <-ctx.Done():
+		return Decision{}, Canceled
 	}
 }
 
@@ -224,7 +202,7 @@ func (b *Broker) serveHook(w http.ResponseWriter, r *http.Request) {
 		decision.UpdatedPermissions = request.Always
 	case Allowed:
 	default:
-		// No decision: Claude Code falls back to its own prompt.
+		// Shutting down: Claude Code keeps its terminal prompt.
 		w.WriteHeader(http.StatusOK)
 		return
 	}

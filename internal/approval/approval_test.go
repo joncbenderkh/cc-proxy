@@ -3,6 +3,7 @@
 package approval
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -10,7 +11,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -28,25 +28,21 @@ const hookBody = `{
 }`
 
 type fixture struct {
-	broker  *Broker
-	server  *httptest.Server
-	viewers atomic.Int64
+	broker *Broker
+	server *httptest.Server
 
 	mu      sync.Mutex
 	pending [][]Request
 }
 
-func newFixture(t *testing.T, viewers int64) *fixture {
+func newFixture(t *testing.T) *fixture {
 	t.Helper()
 	f := &fixture{}
-	f.viewers.Store(viewers)
-	f.broker = NewBroker(func() int { return int(f.viewers.Load()) }, func(r []Request) {
+	f.broker = NewBroker(func(r []Request) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		f.pending = append(f.pending, r)
 	}, slog.New(slog.DiscardHandler))
-	f.broker.grace = 50 * time.Millisecond
-	f.broker.pollInterval = 5 * time.Millisecond
 	mux := http.NewServeMux()
 	f.broker.Register(mux)
 	f.server = httptest.NewServer(mux)
@@ -54,13 +50,14 @@ func newFixture(t *testing.T, viewers int64) *fixture {
 	return f
 }
 
-// hook posts the hook input and returns the response body once the hook
-// is answered.
-func (f *fixture) hook(t *testing.T, body string) <-chan string {
+// hook posts the hook input with ctx and returns the response body once
+// the hook is answered.
+func (f *fixture) hook(t *testing.T, ctx context.Context, body string) <-chan string {
 	t.Helper()
 	out := make(chan string, 1)
 	go func() {
-		resp, err := http.Post(f.server.URL+"/hooks/permission-request", "application/json", strings.NewReader(body))
+		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, f.server.URL+"/hooks/permission-request", strings.NewReader(body))
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			out <- "error: " + err.Error()
 			return
@@ -72,21 +69,21 @@ func (f *fixture) hook(t *testing.T, body string) <-chan string {
 	return out
 }
 
-// awaitPending waits until one request is pending and returns it.
-func (f *fixture) awaitPending(t *testing.T) Request {
+// awaitPending waits until n requests are pending and returns them.
+func (f *fixture) awaitPending(t *testing.T, n int) []Request {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		f.mu.Lock()
 		last := f.pending[len(f.pending)-1]
 		f.mu.Unlock()
-		if len(last) == 1 {
-			return last[0]
+		if len(last) == n {
+			return last
 		}
 		time.Sleep(time.Millisecond)
 	}
-	t.Fatal("no pending request")
-	return Request{}
+	t.Fatalf("pending list never reached %d requests", n)
+	return nil
 }
 
 func (f *fixture) decide(t *testing.T, id, body string) int {
@@ -123,9 +120,9 @@ func TestViewerDecisionAnswersHook(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			f := newFixture(t, 1)
-			answer := f.hook(t, hookBody)
-			pending := f.awaitPending(t)
+			f := newFixture(t)
+			answer := f.hook(t, t.Context(), hookBody)
+			pending := f.awaitPending(t, 1)[0]
 			if pending.SessionID != "s1" || pending.ToolName != "Bash" || pending.Cwd != "/work" || len(pending.Always) != 1 {
 				t.Fatalf("pending = %+v", pending)
 			}
@@ -147,26 +144,20 @@ func TestViewerDecisionAnswersHook(t *testing.T) {
 	}
 }
 
-func TestHookFallsBackToTerminal(t *testing.T) {
-	t.Run("no viewer", func(t *testing.T) {
-		f := newFixture(t, 0)
-		if got := receive(t, f.hook(t, hookBody)); got != "" {
-			t.Fatalf("hook answer = %q, want empty", got)
-		}
-	})
-	t.Run("viewer leaves", func(t *testing.T) {
-		f := newFixture(t, 1)
-		answer := f.hook(t, hookBody)
-		f.awaitPending(t)
-		f.viewers.Store(0)
-		if got := receive(t, answer); got != "" {
-			t.Fatalf("hook answer = %q, want empty", got)
-		}
-	})
+func TestTerminalAnswerWithdrawsRequest(t *testing.T) {
+	f := newFixture(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	f.hook(t, ctx, hookBody)
+	pending := f.awaitPending(t, 1)[0]
+	cancel()
+	f.awaitPending(t, 0)
+	if status := f.decide(t, pending.ID, `{"behavior":"allow"}`); status != http.StatusConflict {
+		t.Fatalf("late decision status %d, want 409", status)
+	}
 }
 
 func TestRejectsInvalidInput(t *testing.T) {
-	f := newFixture(t, 1)
+	f := newFixture(t)
 	resp, err := http.Post(f.server.URL+"/hooks/permission-request", "application/json", strings.NewReader(`{"hook_event_name":"PreToolUse"}`))
 	if err != nil {
 		t.Fatal(err)
@@ -186,7 +177,7 @@ func TestRejectsInvalidInput(t *testing.T) {
 }
 
 func TestPendingListIsNeverNull(t *testing.T) {
-	f := newFixture(t, 0)
+	f := newFixture(t)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if data, _ := json.Marshal(f.pending[0]); string(data) != "[]" {
