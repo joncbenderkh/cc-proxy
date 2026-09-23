@@ -24,6 +24,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -34,6 +35,7 @@ import (
 	"github.com/joncbenderkh/cc-proxy/internal/approval"
 	"github.com/joncbenderkh/cc-proxy/internal/auth"
 	"github.com/joncbenderkh/cc-proxy/internal/feed"
+	"github.com/joncbenderkh/cc-proxy/internal/history"
 	"github.com/joncbenderkh/cc-proxy/internal/prompt"
 	"github.com/joncbenderkh/cc-proxy/internal/proxy"
 )
@@ -57,7 +59,7 @@ func main() {
 }
 
 func newRootCommand() *cobra.Command {
-	var listen, uiListen, uiTokenFile, upstreamURL string
+	var listen, uiListen, uiTokenFile, historyFile, upstreamURL string
 	var logRequests, logResponses, pretty bool
 	cmd := &cobra.Command{
 		Use:     "cc-proxy",
@@ -74,6 +76,8 @@ func newRootCommand() *cobra.Command {
 				}
 			} else if cmd.Flags().Changed("ui-token-file") {
 				return errors.New("--ui-token-file requires --ui-listen")
+			} else if cmd.Flags().Changed("history-file") {
+				return errors.New("--history-file requires --ui-listen")
 			}
 			upstream, err := parseUpstream(upstreamURL)
 			if err != nil {
@@ -82,12 +86,19 @@ func newRootCommand() *cobra.Command {
 			cmd.SilenceUsage = true
 			logger := newLogger(cmd.OutOrStdout(), cmd.ErrOrStderr(), pretty)
 			var token string
+			var turns *history.Log
 			if uiListen != "" {
 				if token, err = loadUIToken(uiTokenFile, logger); err != nil {
 					return err
 				}
+				if historyFile != "" || !cmd.Flags().Changed("history-file") {
+					if turns, err = openHistory(historyFile, logger); err != nil {
+						return err
+					}
+					defer turns.Close()
+				}
 			}
-			return serve(cmd.Context(), listen, uiListen, token, upstream, logger, cmd.Version, proxy.Options{LogRequests: logRequests, LogResponses: logResponses})
+			return serve(cmd.Context(), listen, uiListen, token, turns, upstream, logger, cmd.Version, proxy.Options{LogRequests: logRequests, LogResponses: logResponses})
 		},
 	}
 	cmd.SetVersionTemplate("cc-proxy {{.Version}}\n")
@@ -95,6 +106,7 @@ func newRootCommand() *cobra.Command {
 	cmd.Flags().StringVar(&listen, "listen", "127.0.0.1:8787", "address to listen on (host:port)")
 	cmd.Flags().StringVar(&uiListen, "ui-listen", "", "serve the live feed web page on this loopback address (host:port); off when empty")
 	cmd.Flags().StringVar(&uiTokenFile, "ui-token-file", "", "file holding the web page login token, created if missing (default <user config dir>/cc-proxy/ui-token)")
+	cmd.Flags().StringVar(&historyFile, "history-file", "", `file keeping the feed's newest turns across restarts (default <user cache dir>/cc-proxy/turns.jsonl; "" turns it off)`)
 	cmd.Flags().StringVar(&upstreamURL, "upstream", "https://api.anthropic.com", "Anthropic API base URL (http or https)")
 	cmd.Flags().BoolVar(&logRequests, "log-requests", false, "log the headers and body of every request sent upstream (credentials redacted)")
 	cmd.Flags().BoolVar(&logResponses, "log-responses", false, "log the headers and body of every response relayed to the client")
@@ -202,6 +214,24 @@ func loadUIToken(path string, logger *slog.Logger) (string, error) {
 	return token, nil
 }
 
+// openHistory loads the turns an earlier run stored in the feed history
+// file.
+func openHistory(path string, logger *slog.Logger) (*history.Log, error) {
+	if path == "" {
+		dir, err := os.UserCacheDir()
+		if err != nil {
+			return nil, fmt.Errorf("locate --history-file: %w", err)
+		}
+		path = filepath.Join(dir, "cc-proxy", "turns.jsonl")
+	}
+	turns, err := history.Open(path, feedHistory)
+	if err != nil {
+		return nil, fmt.Errorf("invalid --history-file: %w", err)
+	}
+	logger.Info("history", "file", path, "turns", len(turns.Turns()))
+	return turns, nil
+}
+
 func parseUpstream(raw string) (*url.URL, error) {
 	upstream, err := url.Parse(raw)
 	if err != nil {
@@ -216,11 +246,20 @@ func parseUpstream(raw string) (*url.URL, error) {
 	return upstream, nil
 }
 
-func serve(ctx context.Context, listen, uiListen, uiToken string, upstream *url.URL, logger *slog.Logger, version string, opts proxy.Options) error {
+func serve(ctx context.Context, listen, uiListen, uiToken string, turns *history.Log, upstream *url.URL, logger *slog.Logger, version string, opts proxy.Options) error {
 	var servers []*http.Server
 	if uiListen != "" {
 		hub := feed.NewHub(feedHistory)
-		opts.OnTurn = hub.Publish
+		opts.OnTurn = func(turn feed.Turn) {
+			if turn, ok := hub.Publish(turn); ok && turns != nil {
+				if err := turns.Append(turn); err != nil {
+					logger.Error("history append failed", "err", err)
+				}
+			}
+		}
+		if turns != nil {
+			hub.Restore(turns.Turns())
+		}
 		broker := approval.NewBroker(hub.Viewers, func(pending []approval.Request) { hub.SetState("approvals", pending) }, logger)
 		mux := http.NewServeMux()
 		mux.Handle("/", hub.Handler())

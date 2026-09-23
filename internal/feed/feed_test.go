@@ -43,6 +43,28 @@ func TestHubKeepsBoundedHistory(t *testing.T) {
 	}
 }
 
+func TestRestoredTurnsReplayAndNumberingContinues(t *testing.T) {
+	hub := NewHub(2)
+	hub.Restore([]Turn{{Seq: 7, SessionID: "a"}, {Seq: 8, SessionID: "b"}, {Seq: 9, SessionID: "c"}})
+	turn, ok := hub.Publish(Turn{SessionID: "d"})
+	if !ok || turn.Seq != 10 {
+		t.Fatalf("published seq %d, ok %v; want 10", turn.Seq, ok)
+	}
+	backlog, _, cancel := hub.subscribe(8)
+	defer cancel()
+	var ids []int64
+	for _, ev := range backlog {
+		ids = append(ids, ev.id)
+	}
+	if len(ids) != 2 || ids[0] != 9 || ids[1] != 10 {
+		t.Fatalf("backlog ids = %v, want [9 10]", ids)
+	}
+	hub.Close()
+	if _, ok := hub.Publish(Turn{}); ok {
+		t.Fatal("publish after close reported ok")
+	}
+}
+
 func TestHubDisconnectsSlowSubscriber(t *testing.T) {
 	hub := NewHub(1)
 	_, events, cancel := hub.subscribe(0)
