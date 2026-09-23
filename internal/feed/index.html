@@ -214,8 +214,13 @@ function selectedSession() {
 }
 
 function project(session) {
-  if (session.cwd) return session.cwd.replace(/\/+$/, "").split("/").pop() || session.cwd;
+  if (session.branch) return (session.remote || basename(session.cwd)) + ":" + session.branch;
+  if (session.cwd) return basename(session.cwd);
   return "Session " + session.id.slice(0, 8);
+}
+
+function basename(path) {
+  return path.replace(/\/+$/, "").split("/").pop() || path;
 }
 
 function ago(time) {
@@ -316,12 +321,13 @@ function track(entry, isTurn) {
   if (!entry.session_id) return;
   let session = sessions.get(entry.session_id);
   if (!session) {
-    session = { id: entry.session_id, cwd: "", title: "", last: entry.time, turns: 0, cost: 0, model: "", stop: "" };
+    session = { id: entry.session_id, cwd: "", remote: "", branch: "", title: "", last: entry.time, turns: 0, cost: 0, model: "", stop: "" };
     sessions.set(entry.session_id, session);
   }
   if (new Date(entry.time) > new Date(session.last)) session.last = entry.time;
   if (!session.cwd && entry.cwd) session.cwd = entry.cwd;
   if (!isTurn) return;
+  if (entry.branch) { session.remote = entry.remote || ""; session.branch = entry.branch; }
   if (!session.title && entry.title && entry.cwd) session.title = entry.title;
   session.turns++;
   const message = entry.message;

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/joncbenderkh/cc-proxy/internal/feed"
+	"github.com/joncbenderkh/cc-proxy/internal/gitrepo"
 	"github.com/joncbenderkh/cc-proxy/internal/transcript"
 )
 
@@ -122,6 +123,11 @@ func logExchanges(next http.Handler, logger *slog.Logger, opts Options) http.Han
 				turn.Prompt, _ = transcript.Prompt(request)
 				if session, err := transcript.SessionOf(request); err == nil {
 					turn.Cwd, turn.Title = session.Cwd, session.Title
+					if session.Cwd != "" {
+						if repo, ok := gitrepo.Find(session.Cwd); ok {
+							turn.Remote, turn.Branch = repo.Remote, repo.Branch
+						}
+					}
 				}
 			}
 			opts.OnTurn(turn)
