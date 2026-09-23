@@ -221,7 +221,7 @@ func serve(ctx context.Context, listen, uiListen, uiToken string, upstream *url.
 	if uiListen != "" {
 		hub := feed.NewHub(feedHistory)
 		opts.OnTurn = hub.Publish
-		broker := approval.NewBroker(hub.Viewers, func(pending []approval.Request) { hub.SetState("approvals", pending) }, logger)
+		broker := approval.NewBroker(func(pending []approval.Request) { hub.SetState("approvals", pending) }, logger)
 		mux := http.NewServeMux()
 		mux.Handle("/", hub.Handler())
 		broker.Register(mux)

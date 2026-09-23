@@ -110,12 +110,13 @@ accepts loopback addresses; reach it from a phone with `tailscale serve`,
 which adds TLS.
 
 The UI server also answers Claude Code `PermissionRequest` HTTP hooks at
-`POST /hooks/permission-request` (bearer token required). While a viewer
-has the page open, the hook is held and the prompt appears on the page
-with Allow / Deny / Always allow (the suggested `addRules` allow entries
-only); `POST /approvals/{id}` records the answer. With no viewer, once the
-last viewer has been gone for 15 s, or on shutdown, the hook returns an
-empty 200 and Claude Code falls back to its terminal prompt. Approval log
+`POST /hooks/permission-request` (bearer token required). The hook is
+held and the prompt appears on the page with Allow / Deny / Always allow
+(the suggested `addRules` allow entries only); `POST /approvals/{id}`
+records the answer. Claude Code shows its terminal dialog at the same
+time, and the first answer wins: a terminal answer ends the hook request,
+which withdraws the prompt from the page. On shutdown the hook returns an
+empty 200 and the terminal dialog stays. Approval log
 records carry the tool name and outcome, never the tool input. Hook setup
 in `~/.claude/settings.json`, with `CC_PROXY_UI_TOKEN` exported from the
 token file:

@@ -102,13 +102,6 @@ func (h *Hub) SetState(name string, value any) error {
 	return nil
 }
 
-// Viewers reports how many clients are subscribed to the event stream.
-func (h *Hub) Viewers() int {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return len(h.subscribers)
-}
-
 func (h *Hub) broadcast(ev event) {
 	for ch := range h.subscribers {
 		select {

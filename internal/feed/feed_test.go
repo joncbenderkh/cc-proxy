@@ -133,9 +133,6 @@ func TestStateIsSentOnConnectAndOnChange(t *testing.T) {
 	if got, want := readEvent(t, events), "event: approvals\ndata: [\"a\"]\n"; got != want {
 		t.Fatalf("state snapshot = %q, want %q", got, want)
 	}
-	if hub.Viewers() != 1 {
-		t.Fatalf("viewers = %d, want 1", hub.Viewers())
-	}
 	hub.SetState("approvals", []string{})
 	if got, want := readEvent(t, events), "event: approvals\ndata: []\n"; got != want {
 		t.Fatalf("state change = %q, want %q", got, want)
