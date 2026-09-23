@@ -11,10 +11,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -45,6 +48,7 @@ func main() {
 
 func newRootCommand() *cobra.Command {
 	var listen, upstreamURL string
+	var logRequests, pretty bool
 	cmd := &cobra.Command{
 		Use:     "cc-proxy",
 		Short:   "Local reverse proxy that records Claude Code API traffic",
@@ -59,14 +63,37 @@ func newRootCommand() *cobra.Command {
 				return err
 			}
 			cmd.SilenceUsage = true
-			logger := slog.New(slog.NewJSONHandler(cmd.ErrOrStderr(), nil))
-			return serve(cmd.Context(), listen, upstream, logger, cmd.Version)
+			logOutput := cmd.ErrOrStderr()
+			if pretty {
+				logOutput = indentWriter{logOutput}
+			}
+			logger := slog.New(slog.NewJSONHandler(logOutput, nil))
+			return serve(cmd.Context(), listen, upstream, logger, cmd.Version, proxy.Options{LogRequests: logRequests})
 		},
 	}
 	cmd.SetVersionTemplate("cc-proxy {{.Version}}\n")
 	cmd.Flags().StringVar(&listen, "listen", "127.0.0.1:8787", "address to listen on (host:port)")
 	cmd.Flags().StringVar(&upstreamURL, "upstream", "https://api.anthropic.com", "Anthropic API base URL (http or https)")
+	cmd.Flags().BoolVar(&logRequests, "log-requests", false, "log the headers and body of every request sent upstream (credentials redacted)")
+	cmd.Flags().BoolVar(&pretty, "pretty", false, "pretty-print log records as indented JSON")
 	return cmd
+}
+
+// indentWriter re-indents each JSON log record written through it. The
+// slog JSON handler emits one complete record per Write call.
+type indentWriter struct {
+	out io.Writer
+}
+
+func (w indentWriter) Write(record []byte) (int, error) {
+	var indented bytes.Buffer
+	if err := json.Indent(&indented, record, "", "  "); err != nil {
+		return w.out.Write(record)
+	}
+	if _, err := w.out.Write(indented.Bytes()); err != nil {
+		return 0, err
+	}
+	return len(record), nil
 }
 
 func validateListen(listen string) error {
@@ -94,10 +121,10 @@ func parseUpstream(raw string) (*url.URL, error) {
 	return upstream, nil
 }
 
-func serve(ctx context.Context, listen string, upstream *url.URL, logger *slog.Logger, version string) error {
+func serve(ctx context.Context, listen string, upstream *url.URL, logger *slog.Logger, version string, opts proxy.Options) error {
 	server := &http.Server{
 		Addr:              listen,
-		Handler:           proxy.New(upstream, logger),
+		Handler:           proxy.New(upstream, logger, opts),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
