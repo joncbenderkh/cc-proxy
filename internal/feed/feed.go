@@ -1,14 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Package feed keeps a bounded history of completed turns and serves it,
-// live, as a server-sent event stream and a mobile-friendly web page.
+// Package feed keeps a bounded history of completed turns, plus named
+// live state such as pending approvals, and serves both as a server-sent
+// event stream and a mobile-friendly web page.
 package feed
 
 import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -29,23 +32,33 @@ type Turn struct {
 	Reply      []transcript.Block `json:"reply,omitempty"`
 }
 
-// subscriberBuffer is how many turns a slow client may fall behind before
+// subscriberBuffer is how many events a slow client may fall behind before
 // it is disconnected; it then reconnects and resumes from Last-Event-ID.
 const subscriberBuffer = 64
 
-// Hub fans turns out to subscribers and remembers the most recent ones.
+// event is one server-sent event. Turns carry their sequence number as the
+// event id; state events carry none, so they never move Last-Event-ID.
+type event struct {
+	id   int64
+	name string
+	data []byte
+}
+
+// Hub fans turns and state changes out to subscribers. It remembers the
+// most recent turns and the latest value of each state.
 type Hub struct {
 	mu          sync.Mutex
-	history     []Turn
+	history     []event
 	capacity    int
 	nextSeq     int64
-	subscribers map[chan Turn]struct{}
+	states      map[string][]byte
+	subscribers map[chan event]struct{}
 	closed      bool
 }
 
 // NewHub returns a hub that remembers the last capacity turns.
 func NewHub(capacity int) *Hub {
-	return &Hub{capacity: capacity, nextSeq: 1, subscribers: map[chan Turn]struct{}{}}
+	return &Hub{capacity: capacity, nextSeq: 1, states: map[string][]byte{}, subscribers: map[chan event]struct{}{}}
 }
 
 // Publish numbers turn, stores it and delivers it to every subscriber
@@ -58,13 +71,46 @@ func (h *Hub) Publish(turn Turn) {
 	}
 	turn.Seq = h.nextSeq
 	h.nextSeq++
-	h.history = append(h.history, turn)
+	data, err := json.Marshal(turn)
+	if err != nil {
+		return
+	}
+	ev := event{id: turn.Seq, name: "turn", data: data}
+	h.history = append(h.history, ev)
 	if len(h.history) > h.capacity {
 		h.history = h.history[len(h.history)-h.capacity:]
 	}
+	h.broadcast(ev)
+}
+
+// SetState replaces the value of the named state, sends it to every
+// subscriber, and sends it to later subscribers when they connect.
+func (h *Hub) SetState(name string, value any) error {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.closed {
+		return nil
+	}
+	h.states[name] = data
+	h.broadcast(event{name: name, data: data})
+	return nil
+}
+
+// Viewers reports how many clients are subscribed to the event stream.
+func (h *Hub) Viewers() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.subscribers)
+}
+
+func (h *Hub) broadcast(ev event) {
 	for ch := range h.subscribers {
 		select {
-		case ch <- turn:
+		case ch <- ev:
 		default:
 			delete(h.subscribers, ch)
 			close(ch)
@@ -83,18 +129,22 @@ func (h *Hub) Close() {
 	}
 }
 
-// subscribe returns the remembered turns after seq and a channel of the
-// turns published from now on. The channel is closed when the subscriber
-// falls behind or the hub closes; cancel releases it early.
-func (h *Hub) subscribe(after int64) (backlog []Turn, turns <-chan Turn, cancel func()) {
+// subscribe returns the remembered turns after seq followed by every
+// state, and a channel of the events published from now on. The channel is
+// closed when the subscriber falls behind or the hub closes; cancel
+// releases it early.
+func (h *Hub) subscribe(after int64) (backlog []event, events <-chan event, cancel func()) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	for _, turn := range h.history {
-		if turn.Seq > after {
-			backlog = append(backlog, turn)
+	for _, ev := range h.history {
+		if ev.id > after {
+			backlog = append(backlog, ev)
 		}
 	}
-	ch := make(chan Turn, subscriberBuffer)
+	for _, name := range slices.Sorted(maps.Keys(h.states)) {
+		backlog = append(backlog, event{name: name, data: h.states[name]})
+	}
+	ch := make(chan event, subscriberBuffer)
 	if h.closed {
 		close(ch)
 		return backlog, ch, func() {}
@@ -129,14 +179,14 @@ func (h *Hub) Handler() http.Handler {
 
 func (h *Hub) serveEvents(w http.ResponseWriter, r *http.Request) {
 	after, _ := strconv.ParseInt(r.Header.Get("Last-Event-ID"), 10, 64)
-	backlog, turns, cancel := h.subscribe(after)
+	backlog, events, cancel := h.subscribe(after)
 	defer cancel()
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	flusher := http.NewResponseController(w)
-	for _, turn := range backlog {
-		if writeTurn(w, turn) != nil {
+	for _, ev := range backlog {
+		if writeEvent(w, ev) != nil {
 			return
 		}
 	}
@@ -149,8 +199,8 @@ func (h *Hub) serveEvents(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-r.Context().Done():
 			return
-		case turn, ok := <-turns:
-			if !ok || writeTurn(w, turn) != nil {
+		case ev, ok := <-events:
+			if !ok || writeEvent(w, ev) != nil {
 				return
 			}
 		case <-heartbeat.C:
@@ -164,11 +214,12 @@ func (h *Hub) serveEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func writeTurn(w http.ResponseWriter, turn Turn) error {
-	data, err := json.Marshal(turn)
-	if err != nil {
-		return err
+func writeEvent(w http.ResponseWriter, ev event) error {
+	if ev.id != 0 {
+		if _, err := fmt.Fprintf(w, "id: %d\n", ev.id); err != nil {
+			return err
+		}
 	}
-	_, err = fmt.Fprintf(w, "id: %d\nevent: turn\ndata: %s\n\n", turn.Seq, data)
+	_, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.name, ev.data)
 	return err
 }

@@ -13,10 +13,10 @@ import (
 	"time"
 )
 
-func seqs(turns []Turn) []int64 {
+func ids(events []event) []int64 {
 	var out []int64
-	for _, turn := range turns {
-		out = append(out, turn.Seq)
+	for _, ev := range events {
+		out = append(out, ev.id)
 	}
 	return out
 }
@@ -37,7 +37,7 @@ func TestHubKeepsBoundedHistory(t *testing.T) {
 	for _, tt := range tests {
 		backlog, _, cancel := hub.subscribe(tt.after)
 		cancel()
-		if got := seqs(backlog); !slices.Equal(got, tt.want) {
+		if got := ids(backlog); !slices.Equal(got, tt.want) {
 			t.Errorf("after %d: backlog %v, want %v", tt.after, got, tt.want)
 		}
 	}
@@ -45,13 +45,13 @@ func TestHubKeepsBoundedHistory(t *testing.T) {
 
 func TestHubDisconnectsSlowSubscriber(t *testing.T) {
 	hub := NewHub(1)
-	_, turns, cancel := hub.subscribe(0)
+	_, events, cancel := hub.subscribe(0)
 	defer cancel()
 	for range subscriberBuffer + 1 {
 		hub.Publish(Turn{})
 	}
 	received := 0
-	for range turns {
+	for range events {
 		received++
 	}
 	if received != subscriberBuffer {
@@ -111,6 +111,34 @@ func TestEventsReplayThenStreamLive(t *testing.T) {
 	hub.Close()
 	if rest, _ := io.ReadAll(events); len(rest) != 0 {
 		t.Fatalf("data after close: %q", rest)
+	}
+}
+
+func TestStateIsSentOnConnectAndOnChange(t *testing.T) {
+	hub := NewHub(10)
+	hub.Publish(Turn{})
+	hub.SetState("approvals", []string{"a"})
+	server := httptest.NewServer(hub.Handler())
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	events := bufio.NewReader(resp.Body)
+	if got := readEvent(t, events); !strings.HasPrefix(got, "id: 1\nevent: turn\n") {
+		t.Fatalf("first event = %q", got)
+	}
+	if got, want := readEvent(t, events), "event: approvals\ndata: [\"a\"]\n"; got != want {
+		t.Fatalf("state snapshot = %q, want %q", got, want)
+	}
+	if hub.Viewers() != 1 {
+		t.Fatalf("viewers = %d, want 1", hub.Viewers())
+	}
+	hub.SetState("approvals", []string{})
+	if got, want := readEvent(t, events), "event: approvals\ndata: []\n"; got != want {
+		t.Fatalf("state change = %q, want %q", got, want)
 	}
 }
 
