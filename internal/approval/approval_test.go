@@ -13,6 +13,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/joncbenderkh/cc-proxy/internal/transcript"
 )
 
 const hookBody = `{
@@ -144,7 +146,7 @@ func TestViewerDecisionAnswersHook(t *testing.T) {
 	}
 }
 
-func TestTerminalAnswerWithdrawsRequest(t *testing.T) {
+func TestCanceledHookWithdrawsRequest(t *testing.T) {
 	f := newFixture(t)
 	ctx, cancel := context.WithCancel(t.Context())
 	f.hook(t, ctx, hookBody)
@@ -153,6 +155,41 @@ func TestTerminalAnswerWithdrawsRequest(t *testing.T) {
 	f.awaitPending(t, 0)
 	if status := f.decide(t, pending.ID, `{"behavior":"allow"}`); status != http.StatusConflict {
 		t.Fatalf("late decision status %d, want 409", status)
+	}
+}
+
+func TestToolResultUpstreamWithdrawsRequest(t *testing.T) {
+	tests := []struct {
+		name, body string
+		call       transcript.ToolUse
+	}{
+		{"by name and input", hookBody,
+			transcript.ToolUse{ID: "toolu_1", Name: "Bash", Input: json.RawMessage(`{ "command" : "rm -rf node_modules" }`)}},
+		{"by tool use id", strings.Replace(hookBody, `"tool_name"`, `"tool_use_id": "toolu_1", "tool_name"`, 1),
+			transcript.ToolUse{ID: "toolu_1", Name: "Bash", Input: json.RawMessage(`{}`)}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newFixture(t)
+			answer := f.hook(t, t.Context(), tt.body)
+			pending := f.awaitPending(t, 1)[0]
+			if !f.broker.Waiting("s1") || f.broker.Waiting("s2") {
+				t.Fatal("Waiting does not track the pending session")
+			}
+			f.broker.Answered("s2", []transcript.ToolUse{tt.call})
+			f.broker.Answered("s1", []transcript.ToolUse{{ID: "toolu_9", Name: "Bash", Input: json.RawMessage(`{"command":"ls"}`)}})
+			if !f.broker.Waiting("s1") {
+				t.Fatal("an unrelated tool call withdrew the request")
+			}
+			f.broker.Answered("s1", []transcript.ToolUse{tt.call})
+			if got := receive(t, answer); got != "" {
+				t.Errorf("hook answer = %q, want empty", got)
+			}
+			f.awaitPending(t, 0)
+			if status := f.decide(t, pending.ID, `{"behavior":"allow"}`); status != http.StatusConflict {
+				t.Fatalf("late decision status %d, want 409", status)
+			}
+		})
 	}
 }
 

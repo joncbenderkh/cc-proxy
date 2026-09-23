@@ -27,12 +27,14 @@ type Block struct {
 }
 
 type rawBlock struct {
-	Type    string          `json:"type"`
-	Text    string          `json:"text"`
-	Name    string          `json:"name"`
-	Input   json.RawMessage `json:"input"`
-	Content json.RawMessage `json:"content"`
-	IsError bool            `json:"is_error"`
+	Type      string          `json:"type"`
+	Text      string          `json:"text"`
+	ID        string          `json:"id"`
+	Name      string          `json:"name"`
+	Input     json.RawMessage `json:"input"`
+	ToolUseID string          `json:"tool_use_id"`
+	Content   json.RawMessage `json:"content"`
+	IsError   bool            `json:"is_error"`
 }
 
 // Prompt returns the blocks of the last message of a request when it comes
@@ -69,6 +71,44 @@ func Prompt(request []byte) ([]Block, error) {
 		}
 	}
 	return blocks, nil
+}
+
+// ToolUse is a tool call Claude made.
+type ToolUse struct {
+	ID    string
+	Name  string
+	Input json.RawMessage
+}
+
+// Answered returns the tool calls whose results the last message of a
+// request carries, whether the tool ran or was denied.
+func Answered(request []byte) ([]ToolUse, error) {
+	var body struct {
+		Messages []struct {
+			Role    string          `json:"role"`
+			Content json.RawMessage `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(request, &body); err != nil {
+		return nil, err
+	}
+	n := len(body.Messages)
+	if n < 2 || body.Messages[n-1].Role != "user" || body.Messages[n-2].Role != "assistant" {
+		return nil, nil
+	}
+	results := map[string]bool{}
+	for _, raw := range contentBlocks(body.Messages[n-1].Content) {
+		if raw.Type == "tool_result" {
+			results[raw.ToolUseID] = true
+		}
+	}
+	var calls []ToolUse
+	for _, raw := range contentBlocks(body.Messages[n-2].Content) {
+		if raw.Type == "tool_use" && results[raw.ID] {
+			calls = append(calls, ToolUse{ID: raw.ID, Name: raw.Name, Input: raw.Input})
+		}
+	}
+	return calls, nil
 }
 
 // MaxTitle bounds a session title, in bytes.

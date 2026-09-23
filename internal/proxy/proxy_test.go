@@ -343,3 +343,45 @@ func TestOnTurnReceivesPromptReplyAndUsage(t *testing.T) {
 		t.Errorf("message = %+v", turn.Message)
 	}
 }
+
+func TestOnRequestSentBeforeResponse(t *testing.T) {
+	sent := make(chan string, 1)
+	release := make(chan struct{})
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.Copy(io.Discard, r.Body)
+		<-release
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"id":"msg_1","model":"claude-sonnet-5","usage":{"input_tokens":1,"output_tokens":1}}`)
+	}))
+	defer backend.Close()
+	target, _ := url.Parse(backend.URL)
+	front := httptest.NewServer(New(target, slog.New(slog.NewJSONHandler(io.Discard, nil)), Options{
+		OnRequestSent: func(sessionID string, request []byte) { sent <- sessionID + " " + string(request) },
+	}))
+	defer front.Close()
+
+	const body = `{"messages":[{"role":"user","content":"hello"}]}`
+	done := make(chan error, 1)
+	go func() {
+		req, _ := http.NewRequest(http.MethodPost, front.URL+"/v1/messages", strings.NewReader(body))
+		req.Header.Set("X-Claude-Code-Session-Id", "session-1")
+		resp, err := http.DefaultClient.Do(req)
+		if err == nil {
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+		}
+		done <- err
+	}()
+	select {
+	case got := <-sent:
+		if want := "session-1 " + body; got != want {
+			t.Errorf("sent = %q, want %q", got, want)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("OnRequestSent not called while the response was pending")
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}

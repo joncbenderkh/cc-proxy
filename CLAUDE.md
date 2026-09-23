@@ -114,9 +114,12 @@ The UI server also answers Claude Code `PermissionRequest` HTTP hooks at
 held and the prompt appears on the page with Allow / Deny / Always allow
 (the suggested `addRules` allow entries only); `POST /approvals/{id}`
 records the answer. Claude Code shows its terminal dialog at the same
-time, and the first answer wins: a terminal answer ends the hook request,
-which withdraws the prompt from the page. On shutdown the hook returns an
-empty 200 and the terminal dialog stays. Approval log
+time, and the first answer wins. Claude Code keeps the hook request open
+after a terminal answer, so the proxy watches each `/v1/messages` request
+as it goes upstream: once it carries the tool call's result, the prompt is
+withdrawn from the page and the hook gets an empty 200 (matched by
+`tool_use_id` when the hook input has one, else by tool name and input).
+On shutdown the hook also returns an empty 200. Approval log
 records carry the tool name and outcome, never the tool input. Hook setup
 in `~/.claude/settings.json`, with `CC_PROXY_UI_TOKEN` exported from the
 token file:
