@@ -81,7 +81,7 @@ func TestStreamsEventsWithoutBuffering(t *testing.T) {
 		w.(http.Flusher).Flush()
 		<-release
 		io.WriteString(w, "event: message_stop\ndata: {}\n\n")
-	}), Options{LogRequests: true})
+	}), Options{LogRequests: true, LogResponses: true})
 	defer close(release)
 
 	resp, err := http.Post(front.URL+"/v1/messages", "application/json", strings.NewReader(`{"stream":true}`))
@@ -170,7 +170,49 @@ func TestRequestsNotLoggedByDefault(t *testing.T) {
 	}
 	resp.Body.Close()
 	front.Close()
-	if strings.Contains(logs.String(), "request_body") || strings.Contains(logs.String(), "prompt") {
+	if strings.Contains(logs.String(), "_body") || strings.Contains(logs.String(), "prompt") {
 		t.Errorf("request logged without -log-requests: %s", logs)
+	}
+}
+
+func TestLogResponsesRecordsRelayedResponse(t *testing.T) {
+	const stream = "event: message_start\ndata: {\"type\":\"message_start\"}\n\n" +
+		"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+	front, logs := newProxy(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Set-Cookie", "session="+secretKey)
+		io.WriteString(w, stream)
+	}), Options{LogResponses: true})
+
+	resp, err := http.Post(front.URL+"/v1/messages", "application/json", strings.NewReader(`{"stream":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	front.Close()
+
+	if string(got) != stream {
+		t.Fatalf("client received %q", got)
+	}
+	var record struct {
+		ResponseHeaders http.Header `json:"response_headers"`
+		ResponseBody    []sseEvent  `json:"response_body"`
+		RequestBody     any         `json:"request_body"`
+	}
+	if err := json.Unmarshal(logs.Bytes(), &record); err != nil {
+		t.Fatalf("decode log %q: %v", logs, err)
+	}
+	if strings.Contains(logs.String(), secretKey) {
+		t.Errorf("cookie leaked into logs: %s", logs)
+	}
+	if record.ResponseHeaders.Get("Content-Type") != "text/event-stream" {
+		t.Errorf("response_headers = %v", record.ResponseHeaders)
+	}
+	if len(record.ResponseBody) != 2 || record.ResponseBody[1].Event != "message_stop" {
+		t.Errorf("response_body = %+v", record.ResponseBody)
+	}
+	if record.RequestBody != nil {
+		t.Errorf("request body logged without LogRequests: %v", record.RequestBody)
 	}
 }

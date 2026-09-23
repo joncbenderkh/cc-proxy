@@ -63,7 +63,7 @@ func TestHelpUsesDoubleDashFlags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, flag := range []string{"--listen", "--upstream", "--log-requests", "--pretty", "--version", "--help"} {
+	for _, flag := range []string{"--listen", "--upstream", "--log-requests", "--log-responses", "--pretty", "--version", "--help"} {
 		if !strings.Contains(out, flag) {
 			t.Errorf("help missing %s:\n%s", flag, out)
 		}

@@ -48,7 +48,7 @@ func main() {
 
 func newRootCommand() *cobra.Command {
 	var listen, upstreamURL string
-	var logRequests, pretty bool
+	var logRequests, logResponses, pretty bool
 	cmd := &cobra.Command{
 		Use:     "cc-proxy",
 		Short:   "Local reverse proxy that records Claude Code API traffic",
@@ -68,13 +68,14 @@ func newRootCommand() *cobra.Command {
 				logOutput = indentWriter{logOutput}
 			}
 			logger := slog.New(slog.NewJSONHandler(logOutput, nil))
-			return serve(cmd.Context(), listen, upstream, logger, cmd.Version, proxy.Options{LogRequests: logRequests})
+			return serve(cmd.Context(), listen, upstream, logger, cmd.Version, proxy.Options{LogRequests: logRequests, LogResponses: logResponses})
 		},
 	}
 	cmd.SetVersionTemplate("cc-proxy {{.Version}}\n")
 	cmd.Flags().StringVar(&listen, "listen", "127.0.0.1:8787", "address to listen on (host:port)")
 	cmd.Flags().StringVar(&upstreamURL, "upstream", "https://api.anthropic.com", "Anthropic API base URL (http or https)")
 	cmd.Flags().BoolVar(&logRequests, "log-requests", false, "log the headers and body of every request sent upstream (credentials redacted)")
+	cmd.Flags().BoolVar(&logResponses, "log-responses", false, "log the headers and body of every response relayed to the client")
 	cmd.Flags().BoolVar(&pretty, "pretty", false, "pretty-print log records as indented JSON")
 	return cmd
 }
