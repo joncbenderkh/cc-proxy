@@ -4,6 +4,8 @@ package feed
 
 import (
 	"bufio"
+	"bytes"
+	"image/png"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -183,6 +185,32 @@ func TestIndexPage(t *testing.T) {
 		}
 		if tt.status == http.StatusOK && !strings.Contains(string(body), `new EventSource("events")`) {
 			t.Errorf("%s: page does not subscribe to events", tt.path)
+		}
+	}
+}
+
+func TestAppFiles(t *testing.T) {
+	server := httptest.NewServer(AppFiles())
+	defer server.Close()
+	for path, contentType := range map[string]string{
+		"/sw.js":                "text/javascript; charset=utf-8",
+		"/manifest.webmanifest": "application/manifest+json",
+		"/icon.png":             "image/png",
+	} {
+		resp, err := http.Get(server.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK || resp.Header.Get("Content-Type") != contentType || len(body) == 0 {
+			t.Errorf("%s: status %d, type %q, %d bytes", path, resp.StatusCode, resp.Header.Get("Content-Type"), len(body))
+		}
+		if path == "/icon.png" {
+			img, err := png.Decode(bytes.NewReader(body))
+			if err != nil || img.Bounds().Dx() != 512 {
+				t.Errorf("icon: %v", err)
+			}
 		}
 	}
 }
