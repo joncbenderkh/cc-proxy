@@ -37,6 +37,9 @@ func TestRejectsInvalidArguments(t *testing.T) {
 		{"log-requests with value", []string{"--log-requests=maybe"}, "invalid argument"},
 		{"pretty with value", []string{"--pretty=yes"}, "invalid argument"},
 		{"upstream without host", []string{"--upstream", "https://"}, "missing host"},
+		{"ui-listen not loopback", []string{"--ui-listen", "0.0.0.0:8788"}, "must be a loopback address"},
+		{"ui-listen all interfaces", []string{"--ui-listen", ":8788"}, "must be a loopback address"},
+		{"ui-listen without port", []string{"--ui-listen", "localhost"}, "invalid --ui-listen"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -63,7 +66,7 @@ func TestHelpUsesDoubleDashFlags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, flag := range []string{"--listen", "--upstream", "--log-requests", "--log-responses", "--pretty", "--version", "--help"} {
+	for _, flag := range []string{"--listen", "--upstream", "--log-requests", "--log-responses", "--pretty", "--ui-listen", "--version", "--help"} {
 		if !strings.Contains(out, flag) {
 			t.Errorf("help missing %s:\n%s", flag, out)
 		}

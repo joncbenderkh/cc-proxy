@@ -13,6 +13,9 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"time"
+
+	"github.com/joncbenderkh/cc-proxy/internal/feed"
+	"github.com/joncbenderkh/cc-proxy/internal/transcript"
 )
 
 // Options tunes what the proxy records. The zero value logs exchange
@@ -25,6 +28,10 @@ type Options struct {
 	// the client. The body is copied as it is relayed, so streams are not
 	// delayed; SSE streams are logged as a list of events.
 	LogResponses bool
+	// OnTurn, when set, receives every POST /v1/messages exchange with its
+	// newest prompt, reply, usage and cost once the response has been
+	// relayed in full.
+	OnTurn func(feed.Turn)
 }
 
 // New returns a handler that forwards every request to upstream unchanged,
@@ -52,31 +59,55 @@ func New(upstream *url.URL, logger *slog.Logger, opts Options) http.Handler {
 func logExchanges(next http.Handler, logger *slog.Logger, opts Options) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
+		createsMessage := r.Method == http.MethodPost && r.URL.Path == "/v1/messages"
+		publishesTurn := createsMessage && opts.OnTurn != nil
 		var capture *requestCapture
-		if opts.LogRequests {
+		if opts.LogRequests || publishesTurn {
 			capture = &requestCapture{}
 			r = r.WithContext(context.WithValue(r.Context(), captureKey{}, capture))
 		}
 		recorder := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
-		createsMessage := r.Method == http.MethodPost && r.URL.Path == "/v1/messages"
 		if opts.LogResponses || createsMessage {
 			recorder.body = &bytes.Buffer{}
 		}
 		next.ServeHTTP(recorder, r)
+		duration := time.Since(start)
+		sessionID := r.Header.Get("X-Claude-Code-Session-Id")
 
 		attrs := []any{
 			"method", r.Method,
 			"path", r.URL.Path,
 			"status", recorder.status,
 			"bytes", recorder.bytes,
-			"duration_ms", time.Since(start).Milliseconds(),
+			"duration_ms", duration.Milliseconds(),
 			"request_id", recorder.Header().Get("Request-Id"),
+			"session_id", sessionID,
 		}
-		if capture != nil {
+		if opts.LogRequests {
 			attrs = append(attrs, capture.attrs()...)
 		}
+		var response messageResponse
+		if createsMessage {
+			response = readMessageResponse(recorder.body.Bytes(), recorder.Header())
+		}
 		if createsMessage && recorder.status == http.StatusOK {
-			attrs = append(attrs, messageAttrs(recorder.body.Bytes(), recorder.Header())...)
+			attrs = append(attrs, response.attrs()...)
+		}
+		if publishesTurn {
+			turn := feed.Turn{
+				Time:       start,
+				SessionID:  sessionID,
+				Status:     recorder.status,
+				DurationMs: duration.Milliseconds(),
+				Reply:      response.reply,
+			}
+			if response.err == nil {
+				turn.Message = &response.message
+			}
+			if request, err := decode(capture.body.Bytes(), capture.header.Get("Content-Encoding")); err == nil {
+				turn.Prompt, _ = transcript.Prompt(request)
+			}
+			opts.OnTurn(turn)
 		}
 		if opts.LogResponses {
 			attrs = append(attrs,

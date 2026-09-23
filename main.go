@@ -31,11 +31,15 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/joncbenderkh/cc-proxy/internal/feed"
 	"github.com/joncbenderkh/cc-proxy/internal/proxy"
 )
 
 //go:embed VERSION
 var rawVersion string
+
+// feedHistory is how many turns the live feed replays to a new viewer.
+const feedHistory = 500
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -47,7 +51,7 @@ func main() {
 }
 
 func newRootCommand() *cobra.Command {
-	var listen, upstreamURL string
+	var listen, uiListen, upstreamURL string
 	var logRequests, logResponses, pretty bool
 	cmd := &cobra.Command{
 		Use:     "cc-proxy",
@@ -55,8 +59,13 @@ func newRootCommand() *cobra.Command {
 		Version: strings.TrimSpace(rawVersion),
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if err := validateListen(listen); err != nil {
+			if err := validateListen("--listen", listen); err != nil {
 				return err
+			}
+			if uiListen != "" {
+				if err := validateLoopback("--ui-listen", uiListen); err != nil {
+					return err
+				}
 			}
 			upstream, err := parseUpstream(upstreamURL)
 			if err != nil {
@@ -64,11 +73,12 @@ func newRootCommand() *cobra.Command {
 			}
 			cmd.SilenceUsage = true
 			logger := newLogger(cmd.OutOrStdout(), cmd.ErrOrStderr(), pretty)
-			return serve(cmd.Context(), listen, upstream, logger, cmd.Version, proxy.Options{LogRequests: logRequests, LogResponses: logResponses})
+			return serve(cmd.Context(), listen, uiListen, upstream, logger, cmd.Version, proxy.Options{LogRequests: logRequests, LogResponses: logResponses})
 		},
 	}
 	cmd.SetVersionTemplate("cc-proxy {{.Version}}\n")
 	cmd.Flags().StringVar(&listen, "listen", "127.0.0.1:8787", "address to listen on (host:port)")
+	cmd.Flags().StringVar(&uiListen, "ui-listen", "", "serve the live feed web page on this loopback address (host:port); off when empty")
 	cmd.Flags().StringVar(&upstreamURL, "upstream", "https://api.anthropic.com", "Anthropic API base URL (http or https)")
 	cmd.Flags().BoolVar(&logRequests, "log-requests", false, "log the headers and body of every request sent upstream (credentials redacted)")
 	cmd.Flags().BoolVar(&logResponses, "log-responses", false, "log the headers and body of every response relayed to the client")
@@ -134,13 +144,27 @@ func (w indentWriter) Write(record []byte) (int, error) {
 	return len(record), nil
 }
 
-func validateListen(listen string) error {
+func validateListen(flag, listen string) error {
 	_, port, err := net.SplitHostPort(listen)
 	if err != nil {
-		return fmt.Errorf("invalid --listen %q: %w", listen, err)
+		return fmt.Errorf("invalid %s %q: %w", flag, listen, err)
 	}
 	if _, err := strconv.ParseUint(port, 10, 16); err != nil {
-		return fmt.Errorf("invalid --listen %q: port must be 0-65535", listen)
+		return fmt.Errorf("invalid %s %q: port must be 0-65535", flag, listen)
+	}
+	return nil
+}
+
+// validateLoopback accepts only loopback addresses: the feed shows
+// conversation content and has no authentication yet. Reach it remotely
+// through an authenticating tunnel such as `tailscale serve`.
+func validateLoopback(flag, listen string) error {
+	if err := validateListen(flag, listen); err != nil {
+		return err
+	}
+	host, _, _ := net.SplitHostPort(listen)
+	if ip := net.ParseIP(host); host != "localhost" && (ip == nil || !ip.IsLoopback()) {
+		return fmt.Errorf("invalid %s %q: must be a loopback address such as 127.0.0.1", flag, listen)
 	}
 	return nil
 }
@@ -159,26 +183,52 @@ func parseUpstream(raw string) (*url.URL, error) {
 	return upstream, nil
 }
 
-func serve(ctx context.Context, listen string, upstream *url.URL, logger *slog.Logger, version string, opts proxy.Options) error {
-	server := &http.Server{
+func serve(ctx context.Context, listen, uiListen string, upstream *url.URL, logger *slog.Logger, version string, opts proxy.Options) error {
+	var servers []*http.Server
+	if uiListen != "" {
+		hub := feed.NewHub(feedHistory)
+		opts.OnTurn = hub.Publish
+		ui := &http.Server{Addr: uiListen, Handler: hub.Handler(), ReadHeaderTimeout: 10 * time.Second}
+		ui.RegisterOnShutdown(hub.Close)
+		servers = append(servers, ui)
+	}
+	servers = append([]*http.Server{{
 		Addr:              listen,
 		Handler:           proxy.New(upstream, logger, opts),
 		ReadHeaderTimeout: 10 * time.Second,
+	}}, servers...)
+
+	listeners := make([]net.Listener, 0, len(servers))
+	for _, server := range servers {
+		listener, err := net.Listen("tcp", server.Addr)
+		if err != nil {
+			for _, open := range listeners {
+				open.Close()
+			}
+			return err
+		}
+		listeners = append(listeners, listener)
 	}
 
-	shutdownDone := make(chan struct{})
-	go func() {
-		defer close(shutdownDone)
-		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
+	failed := make(chan error, len(servers))
+	for i, server := range servers {
+		go func() {
+			if err := server.Serve(listeners[i]); !errors.Is(err, http.ErrServerClosed) {
+				failed <- err
+			}
+		}()
+	}
+	logger.Info("listening", "version", version, "addr", listen, "ui_addr", uiListen, "upstream", upstream.String())
+
+	var err error
+	select {
+	case <-ctx.Done():
+	case err = <-failed:
+	}
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	for _, server := range servers {
 		server.Shutdown(shutdownCtx)
-	}()
-
-	logger.Info("listening", "version", version, "addr", listen, "upstream", upstream.String())
-	if err := server.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
-		return err
 	}
-	<-shutdownDone
-	return nil
+	return err
 }
