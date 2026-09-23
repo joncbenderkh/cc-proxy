@@ -29,7 +29,9 @@ type Options struct {
 
 // New returns a handler that forwards every request to upstream unchanged,
 // relays responses (including SSE streams) without buffering, and logs one
-// record per exchange. Credential header values are never logged.
+// record per exchange. A successful POST /v1/messages exchange also records
+// the model, token usage and cost the response reports. Credential header
+// values are never logged.
 func New(upstream *url.URL, logger *slog.Logger, opts Options) http.Handler {
 	reverseProxy := &httputil.ReverseProxy{
 		Rewrite: func(r *httputil.ProxyRequest) {
@@ -56,7 +58,8 @@ func logExchanges(next http.Handler, logger *slog.Logger, opts Options) http.Han
 			r = r.WithContext(context.WithValue(r.Context(), captureKey{}, capture))
 		}
 		recorder := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
-		if opts.LogResponses {
+		createsMessage := r.Method == http.MethodPost && r.URL.Path == "/v1/messages"
+		if opts.LogResponses || createsMessage {
 			recorder.body = &bytes.Buffer{}
 		}
 		next.ServeHTTP(recorder, r)
@@ -72,7 +75,10 @@ func logExchanges(next http.Handler, logger *slog.Logger, opts Options) http.Han
 		if capture != nil {
 			attrs = append(attrs, capture.attrs()...)
 		}
-		if recorder.body != nil {
+		if createsMessage && recorder.status == http.StatusOK {
+			attrs = append(attrs, messageAttrs(recorder.body.Bytes(), recorder.Header())...)
+		}
+		if opts.LogResponses {
 			attrs = append(attrs,
 				"response_headers", redact(recorder.Header()),
 				"response_body", loggableBody(recorder.body.Bytes(), recorder.Header()),
