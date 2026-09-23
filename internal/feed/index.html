@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>cc-proxy feed</title>
+<style>
+:root {
+  --bg: #f6f5f2; --surface: #ffffff; --text: #1d1c1a; --muted: #6b6862;
+  --border: #e3e0da; --user: #eef3fb; --tool: #f3f1ec; --accent: #b4552d;
+  --ok: #2e7d4f; --bad: #b3261e;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161514; --surface: #1f1e1c; --text: #ecebe8; --muted: #9c998f;
+    --border: #34322e; --user: #1f2a3a; --tool: #2a2825; --accent: #e08a5f;
+    --ok: #6cc28f; --bad: #f2877e;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+header {
+  position: sticky; top: 0; z-index: 1; background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  padding: calc(8px + env(safe-area-inset-top)) 16px 8px;
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+}
+h1 { font-size: 16px; margin: 0; }
+#dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bad); }
+#dot.live { background: var(--ok); }
+select {
+  flex: 1 1 160px; min-width: 0; font: inherit; color: var(--text);
+  background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px;
+}
+#total { color: var(--muted); font-variant-numeric: tabular-nums; }
+main { max-width: 760px; margin: 0 auto; padding: 12px 16px 48px; }
+.turn {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  padding: 10px 12px; margin-bottom: 12px; overflow-wrap: anywhere;
+}
+.meta { color: var(--muted); font-size: 12px; display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.meta .err { color: var(--bad); font-weight: 600; }
+.block { margin-top: 8px; white-space: pre-wrap; }
+.user { background: var(--user); border-radius: 8px; padding: 6px 8px; }
+.tool, .result {
+  background: var(--tool); border-radius: 8px; padding: 6px 8px;
+  font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.tool b { color: var(--accent); }
+.result.error { border-left: 3px solid var(--bad); }
+details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+#empty { color: var(--muted); text-align: center; margin-top: 40px; }
+</style>
+</head>
+<body>
+<header>
+  <span id="dot" title="disconnected"></span>
+  <h1>cc-proxy</h1>
+  <select id="session" aria-label="Session"><option value="">Latest session</option></select>
+  <span id="total"></span>
+</header>
+<main>
+  <p id="empty">Waiting for Claude Code traffic…</p>
+  <div id="turns"></div>
+</main>
+<script>
+"use strict";
+const turns = [];
+const sessions = new Map();
+const list = document.getElementById("turns");
+const picker = document.getElementById("session");
+const total = document.getElementById("total");
+const dot = document.getElementById("dot");
+const FOLD = 600;
+
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function folded(className, text) {
+  if (text.length <= FOLD) return el("div", "block " + className, text);
+  const details = el("details", "block " + className);
+  details.append(el("summary", "", text.slice(0, 120).replace(/\s+/g, " ") + "…"), text);
+  return details;
+}
+
+function toolSummary(block) {
+  const input = block.input || {};
+  const key = ["command", "file_path", "pattern", "url", "query", "description", "prompt"].find(k => typeof input[k] === "string");
+  if (key) return input[key];
+  const json = JSON.stringify(input);
+  return json.length > 300 ? json.slice(0, 300) + "…" : json;
+}
+
+function shortModel(model) {
+  return (model || "").replace(/^claude-/, "");
+}
+
+function usd(value) {
+  return "$" + value.toFixed(value < 1 ? 4 : 2);
+}
+
+function render(turn) {
+  const card = el("article", "turn");
+  const meta = el("div", "meta");
+  meta.append(el("span", "", new Date(turn.time).toLocaleTimeString()));
+  const message = turn.message;
+  if (message) {
+    const u = message.usage;
+    meta.append(
+      el("span", "", shortModel(message.model)),
+      el("span", "", (u.input_tokens + u.cache_creation_input_tokens + u.cache_read_input_tokens).toLocaleString() + " in · " + u.output_tokens.toLocaleString() + " out"),
+    );
+    if (message.cost_usd !== undefined) meta.append(el("span", "", usd(message.cost_usd)));
+    if (message.stop_reason) meta.append(el("span", "", message.stop_reason));
+  }
+  if (turn.status !== 200) meta.append(el("span", "err", "HTTP " + turn.status));
+  meta.append(el("span", "", (turn.duration_ms / 1000).toFixed(1) + " s"));
+  card.append(meta);
+
+  for (const block of turn.prompt || []) {
+    if (block.type === "text") card.append(folded("user", block.text));
+    else if (block.type === "tool_result") card.append(folded("result" + (block.is_error ? " error" : ""), block.text || "(no output)"));
+    else card.append(el("div", "block user", "[" + block.type + "]"));
+  }
+  for (const block of turn.reply || []) {
+    if (block.type === "text") card.append(folded("", block.text));
+    else {
+      const tool = el("div", "block tool");
+      tool.append(el("b", "", block.name), " " + toolSummary(block));
+      card.append(tool);
+    }
+  }
+  return card;
+}
+
+function selectedSession() {
+  if (picker.value) return picker.value;
+  const latest = turns.findLast(turn => turn.session_id);
+  return latest ? latest.session_id : "";
+}
+
+function redraw() {
+  const session = selectedSession();
+  const shown = turns.filter(turn => !session || turn.session_id === session);
+  list.replaceChildren(...shown.map(render));
+  const cost = shown.reduce((sum, turn) => sum + ((turn.message && turn.message.cost_usd) || 0), 0);
+  total.textContent = shown.length ? usd(cost) : "";
+  document.getElementById("empty").hidden = shown.length > 0;
+}
+
+function track(turn) {
+  if (!turn.session_id || sessions.has(turn.session_id)) return;
+  sessions.set(turn.session_id, turn.time);
+  const option = el("option", "", turn.session_id.slice(0, 8) + " · " + new Date(turn.time).toLocaleString());
+  option.value = turn.session_id;
+  picker.append(option);
+}
+
+picker.addEventListener("change", redraw);
+
+const nearBottom = () => window.innerHeight + window.scrollY >= document.body.scrollHeight - 80;
+const events = new EventSource("events");
+events.onopen = () => { dot.className = "live"; dot.title = "live"; };
+events.onerror = () => { dot.className = ""; dot.title = "reconnecting"; };
+events.addEventListener("turn", event => {
+  const follow = nearBottom();
+  const turn = JSON.parse(event.data);
+  turns.push(turn);
+  track(turn);
+  redraw();
+  if (follow) window.scrollTo(0, document.body.scrollHeight);
+});
+</script>
+</body>
+</html>
