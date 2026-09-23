@@ -63,6 +63,8 @@ internal/transcript/     prompt / reply text and tool calls of a turn
 internal/feed/           in-memory turn hub, SSE /events, embedded web page
 internal/auth/           UI login token, cookie login, request guard
 internal/approval/       remote answers to PermissionRequest hooks
+internal/prompt/         remote prompts for idle sessions (Stop hooks)
+hook.go                  `cc-proxy hook stop`, the Stop hook command
 .github/workflows/       ci.yml (checks), release.yml (tag -> GitHub Release)
 ```
 
@@ -85,6 +87,7 @@ go run . --log-requests                                    # also log outbound h
 go run . --log-responses                                   # also log response headers + bodies
 go run . --pretty                                          # indented JSON log records
 go run . --ui-listen 127.0.0.1:8788                        # live feed web page
+go run . hook stop --ui-url http://127.0.0.1:8788          # Stop hook (reads hook input on stdin)
 ```
 
 Every successful `POST /v1/messages` exchange record carries a `message`
@@ -121,6 +124,28 @@ token file:
   "timeout": 600,
   "headers": {"Authorization": "Bearer $CC_PROXY_UI_TOKEN"},
   "allowedEnvVars": ["CC_PROXY_UI_TOKEN"]
+}]}]}}
+```
+
+Prompts from the page reach an idle session through `cc-proxy hook stop`,
+run as an `asyncRewake` command hook on `Stop`: it runs in the background,
+so the terminal stays usable, and posts the hook input to
+`POST /hooks/stop`, which holds until a viewer sends a prompt with
+`POST /prompts/{session_id}`. The command then writes the prompt to stderr
+and exits 2, which wakes Claude with it as a system reminder; it exits 0
+when the session stops again (the newer wait replaces the older one) or
+the server shuts down. The page shows a prompt box for the selected
+session while it waits. Prompt log records carry the prompt size, never
+its text. The command reads the token file itself, so no environment
+variable is needed:
+
+```json
+{"hooks": {"Stop": [{"hooks": [{
+  "type": "command",
+  "command": "/path/to/cc-proxy",
+  "args": ["hook", "stop", "--ui-url", "http://127.0.0.1:8788"],
+  "asyncRewake": true,
+  "timeout": 86400
 }]}]}}
 ```
 
