@@ -32,11 +32,28 @@ header {
 h1 { font-size: 16px; margin: 0; }
 #dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bad); }
 #dot.live { background: var(--ok); }
-select {
-  flex: 1 1 160px; min-width: 0; font: inherit; color: var(--text);
-  background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px;
-}
+#back { color: var(--accent); text-decoration: none; font-size: 22px; line-height: 1; padding: 0 4px; }
+#heading { flex: 1 1 0; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #total { color: var(--muted); font-variant-numeric: tabular-nums; }
+.session {
+  display: block; color: inherit; text-decoration: none;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  padding: 10px 12px; margin-bottom: 10px;
+}
+.session.attention { border-color: var(--accent); }
+.session .top { display: flex; gap: 8px; align-items: baseline; }
+.session .project { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session .title {
+  margin: 2px 0 4px; overflow: hidden; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
+}
+.session .title.none { color: var(--muted); font-style: italic; }
+.badge {
+  flex: none; font-size: 12px; border-radius: 999px; padding: 1px 8px;
+  border: 1px solid var(--border); color: var(--muted);
+}
+.badge.attention { background: var(--accent); border-color: var(--accent); color: #fff; }
+.badge.working { color: var(--ok); border-color: var(--ok); }
 main { max-width: 760px; margin: 0 auto; padding: 12px 16px 48px; }
 .turn {
   background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
@@ -83,12 +100,13 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 <body>
 <header>
   <span id="dot" title="disconnected"></span>
-  <h1>cc-proxy</h1>
-  <select id="session" aria-label="Session"><option value="">Latest session</option></select>
+  <a id="back" href="#" aria-label="All sessions" hidden>‹</a>
+  <h1 id="heading">cc-proxy</h1>
   <span id="total"></span>
 </header>
 <main>
   <p id="empty">Waiting for Claude Code traffic…</p>
+  <nav id="sessions" aria-label="Sessions"></nav>
   <div id="turns"></div>
   <div id="dock">
     <section id="approvals" aria-live="assertive"></section>
@@ -105,7 +123,10 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 const turns = [];
 const sessions = new Map();
 const list = document.getElementById("turns");
-const picker = document.getElementById("session");
+const sessionList = document.getElementById("sessions");
+const heading = document.getElementById("heading");
+const back = document.getElementById("back");
+let pending = [];
 const total = document.getElementById("total");
 const dot = document.getElementById("dot");
 const FOLD = 600;
@@ -180,18 +201,76 @@ function render(turn) {
 }
 
 function selectedSession() {
-  if (picker.value) return picker.value;
-  const latest = turns.findLast(turn => turn.session_id);
-  return latest ? latest.session_id : "";
+  const match = location.hash.match(/^#s=(.+)$/);
+  return match ? decodeURIComponent(match[1]) : "";
+}
+
+function project(session) {
+  if (session.cwd) return session.cwd.replace(/\/+$/, "").split("/").pop() || session.cwd;
+  return "Session " + session.id.slice(0, 8);
+}
+
+function ago(time) {
+  const seconds = Math.max(0, (Date.now() - new Date(time)) / 1000);
+  if (seconds < 60) return "just now";
+  if (seconds < 3600) return Math.floor(seconds / 60) + " min ago";
+  if (seconds < 86400) return Math.floor(seconds / 3600) + " h ago";
+  return new Date(time).toLocaleDateString();
+}
+
+function status(session) {
+  const approvals = pending.filter(request => request.session_id === session.id).length;
+  if (approvals) return { label: approvals > 1 ? approvals + " approvals" : "Needs approval", kind: "attention" };
+  if (idle.some(entry => entry.session_id === session.id)) return { label: "Waiting for prompt", kind: "attention" };
+  if (session.stop === "tool_use" && Date.now() - new Date(session.last) < 5 * 60 * 1000) return { label: "Working", kind: "working" };
+  return { label: "Idle", kind: "" };
+}
+
+function renderSession(session) {
+  const state = status(session);
+  const card = el("a", "session" + (state.kind === "attention" ? " attention" : ""));
+  card.href = "#s=" + encodeURIComponent(session.id);
+  const top = el("div", "top");
+  top.append(el("span", "project", project(session)), el("span", "badge " + state.kind, state.label));
+  card.append(top, el("div", "title" + (session.title ? "" : " none"), session.title || "No prompt yet"));
+  const meta = el("div", "meta");
+  meta.append(el("span", "", ago(session.last)));
+  if (session.turns) meta.append(el("span", "", session.turns + (session.turns === 1 ? " turn" : " turns")));
+  if (session.cost) meta.append(el("span", "", usd(session.cost)));
+  if (session.model) meta.append(el("span", "", shortModel(session.model)));
+  meta.append(el("span", "", session.id.slice(0, 8)));
+  card.append(meta);
+  if (session.cwd) card.title = session.cwd;
+  return card;
+}
+
+function showSessions() {
+  const all = [...sessions.values()];
+  const urgent = session => status(session).kind === "attention" ? 1 : 0;
+  all.sort((a, b) => urgent(b) - urgent(a) || new Date(b.last) - new Date(a.last));
+  sessionList.replaceChildren(...all.map(renderSession));
+  const cost = all.reduce((sum, session) => sum + session.cost, 0);
+  total.textContent = all.length ? usd(cost) : "";
+  document.getElementById("empty").hidden = all.length > 0;
 }
 
 function redraw() {
-  const session = selectedSession();
-  const shown = turns.filter(turn => !session || turn.session_id === session);
-  list.replaceChildren(...shown.map(render));
-  const cost = shown.reduce((sum, turn) => sum + ((turn.message && turn.message.cost_usd) || 0), 0);
-  total.textContent = shown.length ? usd(cost) : "";
-  document.getElementById("empty").hidden = shown.length > 0;
+  const id = selectedSession();
+  const session = sessions.get(id);
+  back.hidden = !id;
+  sessionList.hidden = !!id;
+  list.hidden = !id;
+  if (!id) {
+    heading.textContent = "cc-proxy";
+    list.replaceChildren();
+    showSessions();
+  } else {
+    heading.textContent = session ? project(session) + (session.title ? " · " + session.title : "") : "Session " + id.slice(0, 8);
+    const shown = turns.filter(turn => turn.session_id === id);
+    list.replaceChildren(...shown.map(render));
+    total.textContent = session && session.cost ? usd(session.cost) : "";
+    document.getElementById("empty").hidden = shown.length > 0;
+  }
   showComposer();
 }
 
@@ -223,12 +302,26 @@ async function sendPrompt(event) {
   }
 }
 
-function track(turn) {
-  if (!turn.session_id || sessions.has(turn.session_id)) return;
-  sessions.set(turn.session_id, turn.time);
-  const option = el("option", "", turn.session_id.slice(0, 8) + " · " + new Date(turn.time).toLocaleString());
-  option.value = turn.session_id;
-  picker.append(option);
+// track folds a turn, an idle entry or an approval request into the
+// summary of its session.
+function track(entry, isTurn) {
+  if (!entry.session_id) return;
+  let session = sessions.get(entry.session_id);
+  if (!session) {
+    session = { id: entry.session_id, cwd: "", title: "", last: entry.time, turns: 0, cost: 0, model: "", stop: "" };
+    sessions.set(entry.session_id, session);
+  }
+  if (new Date(entry.time) > new Date(session.last)) session.last = entry.time;
+  if (!session.cwd && entry.cwd) session.cwd = entry.cwd;
+  if (!isTurn) return;
+  if (!session.title && entry.title && entry.cwd) session.title = entry.title;
+  session.turns++;
+  const message = entry.message;
+  if (message) {
+    session.cost += message.cost_usd || 0;
+    session.model = message.model;
+    session.stop = message.stop_reason || "";
+  }
 }
 
 function ruleText(entry) {
@@ -255,7 +348,9 @@ function renderApproval(request) {
   const card = el("article", "approval");
   const meta = el("div", "meta");
   meta.append(el("span", "", new Date(request.time).toLocaleTimeString()));
-  if (request.session_id) meta.append(el("span", "", request.session_id.slice(0, 8)));
+  const session = sessions.get(request.session_id);
+  if (session) meta.append(el("span", "", project(session)));
+  else if (request.session_id) meta.append(el("span", "", request.session_id.slice(0, 8)));
   if (request.cwd) meta.append(el("span", "", request.cwd));
   const tool = el("div", "block tool");
   tool.append(el("b", "", request.tool_name), " " + toolSummary({ input: request.tool_input }));
@@ -278,7 +373,7 @@ function renderApproval(request) {
   return card;
 }
 
-function showApprovals(pending) {
+function showApprovals() {
   approvals.replaceChildren(...pending.map(renderApproval));
   document.title = pending.length ? "(" + pending.length + ") cc-proxy" : "cc-proxy feed";
   if (pending.some(request => !seenApprovals.has(request.id))) {
@@ -288,7 +383,8 @@ function showApprovals(pending) {
   pending.forEach(request => seenApprovals.add(request.id));
 }
 
-picker.addEventListener("change", redraw);
+window.addEventListener("hashchange", () => { redraw(); window.scrollTo(0, selectedSession() ? document.body.scrollHeight : 0); });
+setInterval(() => { if (!selectedSession()) showSessions(); }, 30000);
 composer.addEventListener("submit", sendPrompt);
 promptBox.addEventListener("keydown", event => {
   if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) composer.requestSubmit();
@@ -298,20 +394,27 @@ const nearBottom = () => window.innerHeight + window.scrollY >= document.body.sc
 const events = new EventSource("events");
 events.onopen = () => { dot.className = "live"; dot.title = "live"; };
 events.onerror = () => { dot.className = ""; dot.title = "reconnecting"; };
-events.addEventListener("approvals", event => showApprovals(JSON.parse(event.data)));
+events.addEventListener("approvals", event => {
+  pending = JSON.parse(event.data);
+  pending.forEach(request => track(request, false));
+  showApprovals();
+  if (!selectedSession()) showSessions();
+});
 events.addEventListener("idle", event => {
   idle = JSON.parse(event.data);
-  idle.forEach(track);
+  idle.forEach(entry => track(entry, false));
+  if (!selectedSession()) showSessions();
   showComposer();
 });
 events.addEventListener("turn", event => {
   const follow = nearBottom();
   const turn = JSON.parse(event.data);
   turns.push(turn);
-  track(turn);
+  track(turn, true);
   redraw();
-  if (follow) window.scrollTo(0, document.body.scrollHeight);
+  if (follow && selectedSession()) window.scrollTo(0, document.body.scrollHeight);
 });
+redraw();
 </script>
 </body>
 </html>

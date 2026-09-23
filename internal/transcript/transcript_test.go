@@ -54,6 +54,37 @@ func TestPrompt(t *testing.T) {
 	}
 }
 
+func TestSessionOf(t *testing.T) {
+	tests := []struct {
+		name    string
+		request string
+		want    Session
+		wantErr bool
+	}{
+		{"cwd and title",
+			`{"system":[{"type":"text","text":"You are Claude Code."},{"type":"text","text":"# Environment\n - Primary working directory: /home/u/proj\n - Is a git repository: true"}],` +
+				`"messages":[{"role":"user","content":[{"type":"text","text":"<system-reminder>ctx</system-reminder>"},{"type":"text","text":"  fix the build\nplease"}]},{"role":"assistant","content":"ok"},{"role":"user","content":"later"}]}`,
+			Session{Cwd: "/home/u/proj", Title: "fix the build"}, false},
+		{"string system and content", `{"system":"Primary working directory: /w","messages":[{"role":"user","content":"hello"}]}`,
+			Session{Cwd: "/w", Title: "hello"}, false},
+		{"only tagged text", `{"messages":[{"role":"user","content":"<command-name>/compact</command-name>"}]}`, Session{}, false},
+		{"long title", `{"messages":[{"role":"user","content":"` + strings.Repeat("x", MaxTitle+10) + `"}]}`,
+			Session{Title: strings.Repeat("x", MaxTitle) + "…"}, false},
+		{"not json", `nope`, Session{}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := SessionOf([]byte(tt.request))
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, tt.wantErr)
+			}
+			if got != tt.want {
+				t.Fatalf("got %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestReplyJSON(t *testing.T) {
 	got, err := ReplyJSON([]byte(`{"type":"message","content":[` +
 		`{"type":"thinking","thinking":"hmm"},{"type":"text","text":"Running it."},` +
