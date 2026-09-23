@@ -31,6 +31,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/joncbenderkh/cc-proxy/internal/auth"
 	"github.com/joncbenderkh/cc-proxy/internal/feed"
 	"github.com/joncbenderkh/cc-proxy/internal/proxy"
 )
@@ -51,7 +52,7 @@ func main() {
 }
 
 func newRootCommand() *cobra.Command {
-	var listen, uiListen, upstreamURL string
+	var listen, uiListen, uiTokenFile, upstreamURL string
 	var logRequests, logResponses, pretty bool
 	cmd := &cobra.Command{
 		Use:     "cc-proxy",
@@ -66,6 +67,8 @@ func newRootCommand() *cobra.Command {
 				if err := validateLoopback("--ui-listen", uiListen); err != nil {
 					return err
 				}
+			} else if cmd.Flags().Changed("ui-token-file") {
+				return errors.New("--ui-token-file requires --ui-listen")
 			}
 			upstream, err := parseUpstream(upstreamURL)
 			if err != nil {
@@ -73,12 +76,19 @@ func newRootCommand() *cobra.Command {
 			}
 			cmd.SilenceUsage = true
 			logger := newLogger(cmd.OutOrStdout(), cmd.ErrOrStderr(), pretty)
-			return serve(cmd.Context(), listen, uiListen, upstream, logger, cmd.Version, proxy.Options{LogRequests: logRequests, LogResponses: logResponses})
+			var token string
+			if uiListen != "" {
+				if token, err = loadUIToken(uiTokenFile, logger); err != nil {
+					return err
+				}
+			}
+			return serve(cmd.Context(), listen, uiListen, token, upstream, logger, cmd.Version, proxy.Options{LogRequests: logRequests, LogResponses: logResponses})
 		},
 	}
 	cmd.SetVersionTemplate("cc-proxy {{.Version}}\n")
 	cmd.Flags().StringVar(&listen, "listen", "127.0.0.1:8787", "address to listen on (host:port)")
 	cmd.Flags().StringVar(&uiListen, "ui-listen", "", "serve the live feed web page on this loopback address (host:port); off when empty")
+	cmd.Flags().StringVar(&uiTokenFile, "ui-token-file", "", "file holding the web page login token, created if missing (default <user config dir>/cc-proxy/ui-token)")
 	cmd.Flags().StringVar(&upstreamURL, "upstream", "https://api.anthropic.com", "Anthropic API base URL (http or https)")
 	cmd.Flags().BoolVar(&logRequests, "log-requests", false, "log the headers and body of every request sent upstream (credentials redacted)")
 	cmd.Flags().BoolVar(&logResponses, "log-responses", false, "log the headers and body of every response relayed to the client")
@@ -155,9 +165,9 @@ func validateListen(flag, listen string) error {
 	return nil
 }
 
-// validateLoopback accepts only loopback addresses: the feed shows
-// conversation content and has no authentication yet. Reach it remotely
-// through an authenticating tunnel such as `tailscale serve`.
+// validateLoopback accepts only loopback addresses: the feed is plain HTTP,
+// so a login token sent to any other address could be read on the wire.
+// Reach it remotely through a TLS tunnel such as `tailscale serve`.
 func validateLoopback(flag, listen string) error {
 	if err := validateListen(flag, listen); err != nil {
 		return err
@@ -167,6 +177,23 @@ func validateLoopback(flag, listen string) error {
 		return fmt.Errorf("invalid %s %q: must be a loopback address such as 127.0.0.1", flag, listen)
 	}
 	return nil
+}
+
+// loadUIToken reads or creates the web page login token. The token itself
+// is never logged, only the file that holds it.
+func loadUIToken(path string, logger *slog.Logger) (string, error) {
+	if path == "" {
+		var err error
+		if path, err = auth.DefaultTokenFile(); err != nil {
+			return "", fmt.Errorf("locate --ui-token-file: %w", err)
+		}
+	}
+	token, created, err := auth.LoadOrCreateToken(path)
+	if err != nil {
+		return "", fmt.Errorf("invalid --ui-token-file: %w", err)
+	}
+	logger.Info("ui token", "file", path, "created", created)
+	return token, nil
 }
 
 func parseUpstream(raw string) (*url.URL, error) {
@@ -183,12 +210,12 @@ func parseUpstream(raw string) (*url.URL, error) {
 	return upstream, nil
 }
 
-func serve(ctx context.Context, listen, uiListen string, upstream *url.URL, logger *slog.Logger, version string, opts proxy.Options) error {
+func serve(ctx context.Context, listen, uiListen, uiToken string, upstream *url.URL, logger *slog.Logger, version string, opts proxy.Options) error {
 	var servers []*http.Server
 	if uiListen != "" {
 		hub := feed.NewHub(feedHistory)
 		opts.OnTurn = hub.Publish
-		ui := &http.Server{Addr: uiListen, Handler: hub.Handler(), ReadHeaderTimeout: 10 * time.Second}
+		ui := &http.Server{Addr: uiListen, Handler: auth.Require(uiToken, hub.Handler()), ReadHeaderTimeout: 10 * time.Second}
 		ui.RegisterOnShutdown(hub.Close)
 		servers = append(servers, ui)
 	}
