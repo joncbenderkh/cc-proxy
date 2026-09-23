@@ -14,6 +14,9 @@ import (
 	"strings"
 
 	"github.com/andybalholm/brotli"
+
+	"github.com/joncbenderkh/cc-proxy/internal/sse"
+	"github.com/joncbenderkh/cc-proxy/internal/usage"
 )
 
 // redactedHeaders never have their values logged.
@@ -52,10 +55,36 @@ func loggableBody(body []byte, header http.Header) any {
 	if err != nil {
 		return undecodedBody{ContentEncoding: encoding, Bytes: len(body), Error: err.Error()}
 	}
-	if mediaType, _, _ := mime.ParseMediaType(header.Get("Content-Type")); mediaType == "text/event-stream" {
-		return parseSSE(decoded)
+	if isEventStream(header) {
+		return loggableEvents(decoded)
 	}
 	return jsonOrString(decoded)
+}
+
+// messageAttrs reports the model, usage and cost of a Messages API
+// response, or why they could not be read.
+func messageAttrs(body []byte, header http.Header) []any {
+	message, err := readMessage(body, header)
+	if err != nil {
+		return []any{"message_error", err.Error()}
+	}
+	return []any{"message", message}
+}
+
+func readMessage(body []byte, header http.Header) (usage.Message, error) {
+	decoded, err := decode(body, header.Get("Content-Encoding"))
+	if err != nil {
+		return usage.Message{}, err
+	}
+	if isEventStream(header) {
+		return usage.FromStream(sse.Parse(decoded))
+	}
+	return usage.FromJSON(decoded)
+}
+
+func isEventStream(header http.Header) bool {
+	mediaType, _, _ := mime.ParseMediaType(header.Get("Content-Type"))
+	return mediaType == "text/event-stream"
 }
 
 func decode(body []byte, encoding string) ([]byte, error) {
@@ -80,30 +109,11 @@ func decode(body []byte, encoding string) ([]byte, error) {
 	return io.ReadAll(reader)
 }
 
-func parseSSE(stream []byte) []sseEvent {
+func loggableEvents(stream []byte) []sseEvent {
 	events := []sseEvent{}
-	var name string
-	var data []string
-	dispatch := func() {
-		if len(data) > 0 {
-			events = append(events, sseEvent{Event: name, Data: jsonOrString([]byte(strings.Join(data, "\n")))})
-		}
-		name, data = "", nil
+	for _, event := range sse.Parse(stream) {
+		events = append(events, sseEvent{Event: event.Name, Data: jsonOrString([]byte(event.Data))})
 	}
-	for _, line := range strings.Split(string(stream), "\n") {
-		line = strings.TrimSuffix(line, "\r")
-		field, value, _ := strings.Cut(line, ":")
-		value = strings.TrimPrefix(value, " ")
-		switch {
-		case line == "":
-			dispatch()
-		case field == "event":
-			name = value
-		case field == "data":
-			data = append(data, value)
-		}
-	}
-	dispatch()
 	return events
 }
 
