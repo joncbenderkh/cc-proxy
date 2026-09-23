@@ -54,6 +54,22 @@ main { max-width: 760px; margin: 0 auto; padding: 12px 16px 48px; }
 .result.error { border-left: 3px solid var(--bad); }
 details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 #empty { color: var(--muted); text-align: center; margin-top: 40px; }
+#approvals { position: sticky; bottom: 0; padding-bottom: env(safe-area-inset-bottom); }
+.approval {
+  background: var(--surface); border: 2px solid var(--accent); border-radius: 10px;
+  padding: 10px 12px; margin-top: 12px; overflow-wrap: anywhere;
+  box-shadow: 0 -4px 16px rgb(0 0 0 / 0.15);
+}
+.approval .tool { margin-top: 8px; }
+.actions { display: flex; gap: 8px; margin-top: 10px; }
+.actions button {
+  flex: 1; font: inherit; border-radius: 8px; padding: 10px 6px;
+  border: 1px solid var(--border); background: var(--tool); color: var(--text);
+}
+.actions .allow { background: var(--ok); border-color: var(--ok); color: #fff; }
+.actions .deny { color: var(--bad); }
+.actions button:disabled { opacity: 0.5; }
+.approval .err { color: var(--bad); font-size: 13px; margin-top: 6px; }
 </style>
 </head>
 <body>
@@ -66,6 +82,7 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 <main>
   <p id="empty">Waiting for Claude Code traffic…</p>
   <div id="turns"></div>
+  <section id="approvals" aria-live="assertive"></section>
 </main>
 <script>
 "use strict";
@@ -76,6 +93,8 @@ const picker = document.getElementById("session");
 const total = document.getElementById("total");
 const dot = document.getElementById("dot");
 const FOLD = 600;
+const approvals = document.getElementById("approvals");
+const seenApprovals = new Set();
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -164,12 +183,70 @@ function track(turn) {
   picker.append(option);
 }
 
+function ruleText(entry) {
+  return (entry.rules || []).map(rule => rule.ruleContent ? rule.toolName + "(" + rule.ruleContent + ")" : rule.toolName).join(", ");
+}
+
+async function decide(card, id, behavior, always) {
+  const buttons = card.querySelectorAll("button");
+  buttons.forEach(button => { button.disabled = true; });
+  try {
+    const response = await fetch("approvals/" + encodeURIComponent(id), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ behavior, always }),
+    });
+    if (!response.ok) throw new Error((await response.text()).trim() || "HTTP " + response.status);
+  } catch (error) {
+    buttons.forEach(button => { button.disabled = false; });
+    card.querySelector(".err").textContent = error.message;
+  }
+}
+
+function renderApproval(request) {
+  const card = el("article", "approval");
+  const meta = el("div", "meta");
+  meta.append(el("span", "", new Date(request.time).toLocaleTimeString()));
+  if (request.session_id) meta.append(el("span", "", request.session_id.slice(0, 8)));
+  if (request.cwd) meta.append(el("span", "", request.cwd));
+  const tool = el("div", "block tool");
+  tool.append(el("b", "", request.tool_name), " " + toolSummary({ input: request.tool_input }));
+  const input = el("details", "block");
+  input.append(el("summary", "", "Full input"), el("div", "block result", JSON.stringify(request.tool_input, null, 2)));
+  const actions = el("div", "actions");
+  const deny = el("button", "deny", "Deny");
+  deny.onclick = () => decide(card, request.id, "deny", false);
+  const allow = el("button", "allow", "Allow");
+  allow.onclick = () => decide(card, request.id, "allow", false);
+  actions.append(deny, allow);
+  const rules = (request.always || []).map(ruleText).filter(Boolean).join(", ");
+  if (rules) {
+    const always = el("button", "", "Always allow");
+    always.title = rules;
+    always.onclick = () => decide(card, request.id, "allow", true);
+    actions.append(always);
+  }
+  card.append(meta, tool, input, actions, el("div", "err"));
+  return card;
+}
+
+function showApprovals(pending) {
+  approvals.replaceChildren(...pending.map(renderApproval));
+  document.title = pending.length ? "(" + pending.length + ") cc-proxy" : "cc-proxy feed";
+  if (pending.some(request => !seenApprovals.has(request.id))) {
+    if (navigator.vibrate) navigator.vibrate(200);
+    window.scrollTo(0, document.body.scrollHeight);
+  }
+  pending.forEach(request => seenApprovals.add(request.id));
+}
+
 picker.addEventListener("change", redraw);
 
 const nearBottom = () => window.innerHeight + window.scrollY >= document.body.scrollHeight - 80;
 const events = new EventSource("events");
 events.onopen = () => { dot.className = "live"; dot.title = "live"; };
 events.onerror = () => { dot.className = ""; dot.title = "reconnecting"; };
+events.addEventListener("approvals", event => showApprovals(JSON.parse(event.data)));
 events.addEventListener("turn", event => {
   const follow = nearBottom();
   const turn = JSON.parse(event.data);

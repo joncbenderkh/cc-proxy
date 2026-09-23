@@ -145,3 +145,14 @@ func TestLoginRejectsWrongToken(t *testing.T) {
 		t.Fatalf("login page = %d", rec.Code)
 	}
 }
+
+func TestRequireRefusesCrossOriginWrites(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/approvals/x", strings.NewReader("{}"))
+	req.AddCookie(&http.Cookie{Name: CookieName, Value: testToken})
+	req.Header.Set("Sec-Fetch-Site", "same-site")
+	rec := httptest.NewRecorder()
+	guarded().ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("got %d, want 403", rec.Code)
+	}
+}

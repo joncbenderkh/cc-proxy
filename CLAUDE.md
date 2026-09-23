@@ -62,6 +62,7 @@ internal/usage/          model / token / cost extraction and the price table
 internal/transcript/     prompt / reply text and tool calls of a turn
 internal/feed/           in-memory turn hub, SSE /events, embedded web page
 internal/auth/           UI login token, cookie login, request guard
+internal/approval/       remote answers to PermissionRequest hooks
 .github/workflows/       ci.yml (checks), release.yml (tag -> GitHub Release)
 ```
 
@@ -101,6 +102,27 @@ get a 400-day HttpOnly cookie, or send `Authorization: Bearer …`. The token
 is never logged, only its file path. The UI is plain HTTP, so it only
 accepts loopback addresses; reach it from a phone with `tailscale serve`,
 which adds TLS.
+
+The UI server also answers Claude Code `PermissionRequest` HTTP hooks at
+`POST /hooks/permission-request` (bearer token required). While a viewer
+has the page open, the hook is held and the prompt appears on the page
+with Allow / Deny / Always allow (the suggested `addRules` allow entries
+only); `POST /approvals/{id}` records the answer. With no viewer, once the
+last viewer has been gone for 15 s, or on shutdown, the hook returns an
+empty 200 and Claude Code falls back to its terminal prompt. Approval log
+records carry the tool name and outcome, never the tool input. Hook setup
+in `~/.claude/settings.json`, with `CC_PROXY_UI_TOKEN` exported from the
+token file:
+
+```json
+{"hooks": {"PermissionRequest": [{"hooks": [{
+  "type": "http",
+  "url": "http://127.0.0.1:8788/hooks/permission-request",
+  "timeout": 600,
+  "headers": {"Authorization": "Bearer $CC_PROXY_UI_TOKEN"},
+  "allowedEnvVars": ["CC_PROXY_UI_TOKEN"]
+}]}]}}
+```
 
 Log records go to stdout as JSON lines; only error-level records (and CLI
 errors) go to stderr, so `cc-proxy > claude.log` captures the traffic log.
