@@ -45,6 +45,7 @@ func main() {
 
 func newRootCommand() *cobra.Command {
 	var listen, upstreamURL string
+	var logRequests bool
 	cmd := &cobra.Command{
 		Use:     "cc-proxy",
 		Short:   "Local reverse proxy that records Claude Code API traffic",
@@ -60,12 +61,13 @@ func newRootCommand() *cobra.Command {
 			}
 			cmd.SilenceUsage = true
 			logger := slog.New(slog.NewJSONHandler(cmd.ErrOrStderr(), nil))
-			return serve(cmd.Context(), listen, upstream, logger, cmd.Version)
+			return serve(cmd.Context(), listen, upstream, logger, cmd.Version, proxy.Options{LogRequests: logRequests})
 		},
 	}
 	cmd.SetVersionTemplate("cc-proxy {{.Version}}\n")
 	cmd.Flags().StringVar(&listen, "listen", "127.0.0.1:8787", "address to listen on (host:port)")
 	cmd.Flags().StringVar(&upstreamURL, "upstream", "https://api.anthropic.com", "Anthropic API base URL (http or https)")
+	cmd.Flags().BoolVar(&logRequests, "log-requests", false, "log the headers and body of every request sent upstream (credentials redacted)")
 	return cmd
 }
 
@@ -94,10 +96,10 @@ func parseUpstream(raw string) (*url.URL, error) {
 	return upstream, nil
 }
 
-func serve(ctx context.Context, listen string, upstream *url.URL, logger *slog.Logger, version string) error {
+func serve(ctx context.Context, listen string, upstream *url.URL, logger *slog.Logger, version string, opts proxy.Options) error {
 	server := &http.Server{
 		Addr:              listen,
-		Handler:           proxy.New(upstream, logger),
+		Handler:           proxy.New(upstream, logger, opts),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

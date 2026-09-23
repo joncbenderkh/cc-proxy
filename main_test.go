@@ -33,6 +33,8 @@ func TestRejectsInvalidArguments(t *testing.T) {
 		{"listen port not numeric", []string{"--listen", "127.0.0.1:http"}, "port must be 0-65535"},
 		{"upstream without scheme", []string{"--upstream", "api.anthropic.com"}, "scheme must be http or https"},
 		{"upstream unsupported scheme", []string{"--upstream", "ftp://api.anthropic.com"}, "scheme must be http or https"},
+		{"single-dash log-requests", []string{"-log-requests"}, "unknown shorthand flag"},
+		{"log-requests with value", []string{"--log-requests=maybe"}, "invalid argument"},
 		{"upstream without host", []string{"--upstream", "https://"}, "missing host"},
 	}
 	for _, tt := range tests {
@@ -60,7 +62,7 @@ func TestHelpUsesDoubleDashFlags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, flag := range []string{"--listen", "--upstream", "--version", "--help"} {
+	for _, flag := range []string{"--listen", "--upstream", "--log-requests", "--version", "--help"} {
 		if !strings.Contains(out, flag) {
 			t.Errorf("help missing %s:\n%s", flag, out)
 		}

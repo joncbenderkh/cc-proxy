@@ -5,6 +5,7 @@ package proxy
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -17,7 +18,7 @@ import (
 
 const secretKey = "sk-ant-test-secret"
 
-func newProxy(t *testing.T, upstream http.Handler) (*httptest.Server, *bytes.Buffer) {
+func newProxy(t *testing.T, upstream http.Handler, opts Options) (*httptest.Server, *bytes.Buffer) {
 	t.Helper()
 	backend := httptest.NewServer(upstream)
 	t.Cleanup(backend.Close)
@@ -26,7 +27,7 @@ func newProxy(t *testing.T, upstream http.Handler) (*httptest.Server, *bytes.Buf
 		t.Fatal(err)
 	}
 	var logs bytes.Buffer
-	front := httptest.NewServer(New(target, slog.New(slog.NewJSONHandler(&logs, nil))))
+	front := httptest.NewServer(New(target, slog.New(slog.NewJSONHandler(&logs, nil)), opts))
 	t.Cleanup(front.Close)
 	return front, &logs
 }
@@ -48,7 +49,7 @@ func TestForwardsRequestAndResponseUnchanged(t *testing.T) {
 		w.Header().Set("Request-Id", "req_123")
 		w.Header().Set("Content-Type", "application/json")
 		io.WriteString(w, responseBody)
-	}))
+	}), Options{})
 
 	req, _ := http.NewRequest(http.MethodPost, front.URL+"/v1/messages", strings.NewReader(requestBody))
 	req.Header.Set("X-Api-Key", secretKey)
@@ -80,7 +81,7 @@ func TestStreamsEventsWithoutBuffering(t *testing.T) {
 		w.(http.Flusher).Flush()
 		<-release
 		io.WriteString(w, "event: message_stop\ndata: {}\n\n")
-	}))
+	}), Options{LogRequests: true})
 	defer close(release)
 
 	resp, err := http.Post(front.URL+"/v1/messages", "application/json", strings.NewReader(`{"stream":true}`))
@@ -107,7 +108,7 @@ func TestStreamsEventsWithoutBuffering(t *testing.T) {
 func TestUpstreamFailureReturnsBadGateway(t *testing.T) {
 	var logs bytes.Buffer
 	unreachable := &url.URL{Scheme: "http", Host: "127.0.0.1:1"}
-	front := httptest.NewServer(New(unreachable, slog.New(slog.NewJSONHandler(&logs, nil))))
+	front := httptest.NewServer(New(unreachable, slog.New(slog.NewJSONHandler(&logs, nil)), Options{}))
 	defer front.Close()
 
 	resp, err := http.Get(front.URL + "/v1/models")
@@ -117,5 +118,59 @@ func TestUpstreamFailureReturnsBadGateway(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusBadGateway {
 		t.Fatalf("status = %d", resp.StatusCode)
+	}
+}
+
+func TestLogRequestsRecordsOutboundRequest(t *testing.T) {
+	const requestBody = `{"model":"claude-sonnet-5","messages":[{"role":"user","content":"hi"}]}`
+	front, logs := newProxy(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if string(body) != requestBody {
+			t.Errorf("upstream body = %q", body)
+		}
+	}), Options{LogRequests: true})
+
+	req, _ := http.NewRequest(http.MethodPost, front.URL+"/v1/messages", strings.NewReader(requestBody))
+	req.Header.Set("X-Api-Key", secretKey)
+	req.Header.Set("Authorization", "Bearer "+secretKey)
+	req.Header.Set("Anthropic-Version", "2023-06-01")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	front.Close()
+
+	var record struct {
+		RequestHeaders http.Header     `json:"request_headers"`
+		RequestBody    json.RawMessage `json:"request_body"`
+	}
+	if err := json.Unmarshal(logs.Bytes(), &record); err != nil {
+		t.Fatalf("decode log %q: %v", logs, err)
+	}
+	if strings.Contains(logs.String(), secretKey) {
+		t.Errorf("credential leaked into logs: %s", logs)
+	}
+	if got := record.RequestHeaders.Get("X-Api-Key"); got != "[REDACTED]" {
+		t.Errorf("x-api-key logged as %q", got)
+	}
+	if got := record.RequestHeaders.Get("Anthropic-Version"); got != "2023-06-01" {
+		t.Errorf("anthropic-version logged as %q", got)
+	}
+	if string(record.RequestBody) != requestBody {
+		t.Errorf("request_body = %s", record.RequestBody)
+	}
+}
+
+func TestRequestsNotLoggedByDefault(t *testing.T) {
+	front, logs := newProxy(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}), Options{})
+	resp, err := http.Post(front.URL+"/v1/messages", "application/json", strings.NewReader(`{"secret":"prompt"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	front.Close()
+	if strings.Contains(logs.String(), "request_body") || strings.Contains(logs.String(), "prompt") {
+		t.Errorf("request logged without -log-requests: %s", logs)
 	}
 }
