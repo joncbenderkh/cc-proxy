@@ -31,6 +31,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/joncbenderkh/cc-proxy/internal/approval"
 	"github.com/joncbenderkh/cc-proxy/internal/auth"
 	"github.com/joncbenderkh/cc-proxy/internal/feed"
 	"github.com/joncbenderkh/cc-proxy/internal/proxy"
@@ -215,8 +216,21 @@ func serve(ctx context.Context, listen, uiListen, uiToken string, upstream *url.
 	if uiListen != "" {
 		hub := feed.NewHub(feedHistory)
 		opts.OnTurn = hub.Publish
-		ui := &http.Server{Addr: uiListen, Handler: auth.Require(uiToken, hub.Handler()), ReadHeaderTimeout: 10 * time.Second}
+		broker := approval.NewBroker(hub.Viewers, func(pending []approval.Request) { hub.SetState("approvals", pending) }, logger)
+		mux := http.NewServeMux()
+		mux.Handle("/", hub.Handler())
+		broker.Register(mux)
+		// Canceling the base context on shutdown releases held permission
+		// hooks, which hands their prompts back to the terminal.
+		uiCtx, cancelUI := context.WithCancel(context.Background())
+		ui := &http.Server{
+			Addr:              uiListen,
+			Handler:           auth.Require(uiToken, mux),
+			ReadHeaderTimeout: 10 * time.Second,
+			BaseContext:       func(net.Listener) context.Context { return uiCtx },
+		}
 		ui.RegisterOnShutdown(hub.Close)
+		ui.RegisterOnShutdown(cancelUI)
 		servers = append(servers, ui)
 	}
 	servers = append([]*http.Server{{
