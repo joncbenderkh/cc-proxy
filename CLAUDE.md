@@ -59,6 +59,8 @@ VERSION                  single source of truth for the version
 internal/proxy/          transparent reverse proxy + per-exchange logging
 internal/sse/            server-sent event stream parsing
 internal/usage/          model / token / cost extraction and the price table
+internal/transcript/     prompt / reply text and tool calls of a turn
+internal/feed/           in-memory turn hub, SSE /events, embedded web page
 .github/workflows/       ci.yml (checks), release.yml (tag -> GitHub Release)
 ```
 
@@ -80,12 +82,19 @@ go run . --listen 127.0.0.1:8787                           # run locally
 go run . --log-requests                                    # also log outbound headers + bodies
 go run . --log-responses                                   # also log response headers + bodies
 go run . --pretty                                          # indented JSON log records
+go run . --ui-listen 127.0.0.1:8788                        # live feed web page
 ```
 
 Every successful `POST /v1/messages` exchange record carries a `message`
 object (`id`, `model`, `stop_reason`, `usage`, `cost_usd`), or a
 `message_error` when the response could not be read; `cost_usd` is omitted
-for models without a known price.
+for models without a known price. Records also carry `session_id` from the
+`X-Claude-Code-Session-Id` request header when present.
+
+`--ui-listen` serves a mobile web page (`/`) and an SSE stream of turns
+(`/events`, resumable via `Last-Event-ID`) from an in-memory ring of the
+last 500 turns. It has no authentication yet, so it only accepts loopback
+addresses; reach it from a phone with `tailscale serve` until step 3 lands.
 
 Log records go to stdout as JSON lines; only error-level records (and CLI
 errors) go to stderr, so `cc-proxy > claude.log` captures the traffic log.
