@@ -7,7 +7,6 @@ package proxy
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -22,10 +21,11 @@ type Options struct {
 	// LogRequests adds the headers and body of every request sent upstream
 	// to its exchange record. Credential header values are redacted.
 	LogRequests bool
+	// LogResponses adds the headers and body of every response relayed to
+	// the client. The body is copied as it is relayed, so streams are not
+	// delayed; SSE streams are logged as a list of events.
+	LogResponses bool
 }
-
-// redactedHeaders never have their values logged.
-var redactedHeaders = []string{"X-Api-Key", "Authorization", "Proxy-Authorization", "Cookie"}
 
 // New returns a handler that forwards every request to upstream unchanged,
 // relays responses (including SSE streams) without buffering, and logs one
@@ -56,6 +56,9 @@ func logExchanges(next http.Handler, logger *slog.Logger, opts Options) http.Han
 			r = r.WithContext(context.WithValue(r.Context(), captureKey{}, capture))
 		}
 		recorder := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		if opts.LogResponses {
+			recorder.body = &bytes.Buffer{}
+		}
 		next.ServeHTTP(recorder, r)
 
 		attrs := []any{
@@ -68,6 +71,12 @@ func logExchanges(next http.Handler, logger *slog.Logger, opts Options) http.Han
 		}
 		if capture != nil {
 			attrs = append(attrs, capture.attrs()...)
+		}
+		if recorder.body != nil {
+			attrs = append(attrs,
+				"response_headers", redact(recorder.Header()),
+				"response_body", loggableBody(recorder.body.Bytes(), recorder.Header()),
+			)
 		}
 		logger.Info("exchange", attrs...)
 	})
@@ -90,22 +99,7 @@ func (c *requestCapture) record(out *http.Request) {
 }
 
 func (c *requestCapture) attrs() []any {
-	body := c.body.Bytes()
-	var loggedBody any = string(body)
-	if json.Valid(body) {
-		loggedBody = json.RawMessage(body)
-	}
-	return []any{"request_headers", c.header, "request_body", loggedBody}
-}
-
-func redact(header http.Header) http.Header {
-	clone := header.Clone()
-	for _, name := range redactedHeaders {
-		if _, ok := clone[name]; ok {
-			clone[name] = []string{"[REDACTED]"}
-		}
-	}
-	return clone
+	return []any{"request_headers", c.header, "request_body", loggableBody(c.body.Bytes(), c.header)}
 }
 
 type teeReadCloser struct {
@@ -113,13 +107,15 @@ type teeReadCloser struct {
 	io.Closer
 }
 
-// statusRecorder captures the status code and body size of a response.
+// statusRecorder captures the status code and body size of a response, and
+// a copy of the body when body is non-nil.
 // Unwrap lets http.ResponseController reach the underlying Flusher, so
 // streaming responses are still flushed event by event.
 type statusRecorder struct {
 	http.ResponseWriter
 	status int
 	bytes  int64
+	body   *bytes.Buffer
 }
 
 func (s *statusRecorder) WriteHeader(status int) {
@@ -130,6 +126,9 @@ func (s *statusRecorder) WriteHeader(status int) {
 func (s *statusRecorder) Write(p []byte) (int, error) {
 	n, err := s.ResponseWriter.Write(p)
 	s.bytes += int64(n)
+	if s.body != nil {
+		s.body.Write(p[:n])
+	}
 	return n, err
 }
 

@@ -38,6 +38,11 @@ log the `x-api-key` / `Authorization` header values.
   GNU-style `--long` flags, strict rejection of unknown flags, single-dash
   long flags and stray positional arguments, and generated help; all pure
   Go. Every flag value is validated before the server starts.
+- **Brotli:** `github.com/andybalholm/brotli` (pure Go) decodes `br`
+  response bodies for `--log-responses` only; the relayed bytes are never
+  touched. Justification: the Anthropic API answers `Accept-Encoding: br`
+  (sent by Node `fetch`) with Brotli, the stdlib has no decoder, and
+  rewriting `Accept-Encoding` would break transparency.
 - **Module path:** `github.com/joncbenderkh/cc-proxy`.
 
 ## Layout
@@ -65,8 +70,12 @@ go vet ./...                                               # vet
 go run honnef.co/go/tools/cmd/staticcheck@2026.2.1 ./...   # lint
 go run . --listen 127.0.0.1:8787                           # run locally
 go run . --log-requests                                    # also log outbound headers + bodies
+go run . --log-responses                                   # also log response headers + bodies
 go run . --pretty                                          # indented JSON log records
 ```
+
+Log records go to stdout as JSON lines; only error-level records (and CLI
+errors) go to stderr, so `cc-proxy > claude.log` captures the traffic log.
 
 Releases: bump `VERSION`, merge, then tag `vX.Y.Z` on `main` and push the
 tag; `release.yml` verifies the tag matches `VERSION`, cross-compiles

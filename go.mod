@@ -2,7 +2,10 @@ module github.com/joncbenderkh/cc-proxy
 
 go 1.27.1
 
-require github.com/spf13/cobra v1.10.2
+require (
+	github.com/andybalholm/brotli v1.2.4
+	github.com/spf13/cobra v1.10.2
+)
 
 require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect

@@ -63,7 +63,7 @@ func TestHelpUsesDoubleDashFlags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, flag := range []string{"--listen", "--upstream", "--log-requests", "--pretty", "--version", "--help"} {
+	for _, flag := range []string{"--listen", "--upstream", "--log-requests", "--log-responses", "--pretty", "--version", "--help"} {
 		if !strings.Contains(out, flag) {
 			t.Errorf("help missing %s:\n%s", flag, out)
 		}
@@ -89,5 +89,20 @@ func TestIndentWriterPrettyPrintsRecords(t *testing.T) {
 				t.Fatalf("output = %q, want %q", out.String(), tt.want)
 			}
 		})
+	}
+}
+
+func TestLoggerSendsOnlyErrorsToStderr(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	logger := newLogger(&stdout, &stderr, false).With("component", "proxy")
+	logger.Info("exchange")
+	logger.Warn("slow upstream")
+	logger.Error("upstream request failed")
+
+	if got := strings.Count(stdout.String(), "\n"); got != 2 || strings.Contains(stdout.String(), "upstream request failed") {
+		t.Errorf("stdout = %q", stdout.String())
+	}
+	if got := stderr.String(); strings.Count(got, "\n") != 1 || !strings.Contains(got, `"msg":"upstream request failed"`) || !strings.Contains(got, `"component":"proxy"`) {
+		t.Errorf("stderr = %q", got)
 	}
 }

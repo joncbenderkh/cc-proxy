@@ -2,3 +2,4 @@
 /cc-proxy.exe
 /build/
 /dist/
+*.log
