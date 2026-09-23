@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>cc-proxy login</title>
+<style>
+:root { --bg: #f6f5f2; --surface: #ffffff; --text: #1d1c1a; --muted: #6b6862; --border: #e3e0da; --accent: #b4552d; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #161514; --surface: #1f1e1c; --text: #ecebe8; --muted: #9c998f; --border: #34322e; --accent: #e08a5f; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 420px; margin: 0 auto; padding: 48px 16px; }
+h1 { font-size: 18px; margin: 0 0 8px; }
+p { color: var(--muted); margin: 0 0 16px; }
+code { overflow-wrap: anywhere; }
+input, button { width: 100%; font: inherit; border-radius: 8px; padding: 10px 12px; }
+input { color: var(--text); background: var(--surface); border: 1px solid var(--border); margin-bottom: 12px; }
+button { color: #fff; background: var(--accent); border: 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>cc-proxy</h1>
+  <p>Paste the token from the file named in cc-proxy&rsquo;s <code>ui token</code> log record.</p>
+  <form method="post" action="login">
+    <input name="token" type="password" autocomplete="current-password" aria-label="Token" required autofocus>
+    <button type="submit">Sign in</button>
+  </form>
+</main>
+</body>
+</html>

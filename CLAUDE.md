@@ -61,6 +61,7 @@ internal/sse/            server-sent event stream parsing
 internal/usage/          model / token / cost extraction and the price table
 internal/transcript/     prompt / reply text and tool calls of a turn
 internal/feed/           in-memory turn hub, SSE /events, embedded web page
+internal/auth/           UI login token, cookie login, request guard
 .github/workflows/       ci.yml (checks), release.yml (tag -> GitHub Release)
 ```
 
@@ -93,8 +94,13 @@ for models without a known price. Records also carry `session_id` from the
 
 `--ui-listen` serves a mobile web page (`/`) and an SSE stream of turns
 (`/events`, resumable via `Last-Event-ID`) from an in-memory ring of the
-last 500 turns. It has no authentication yet, so it only accepts loopback
-addresses; reach it from a phone with `tailscale serve` until step 3 lands.
+last 500 turns. Both require the token in `--ui-token-file` (default
+`<user config dir>/cc-proxy/ui-token`, created 0600 on first run; delete it
+to rotate): open `/login?token=…` or paste it into the login form once to
+get a 400-day HttpOnly cookie, or send `Authorization: Bearer …`. The token
+is never logged, only its file path. The UI is plain HTTP, so it only
+accepts loopback addresses; reach it from a phone with `tailscale serve`,
+which adds TLS.
 
 Log records go to stdout as JSON lines; only error-level records (and CLI
 errors) go to stderr, so `cc-proxy > claude.log` captures the traffic log.

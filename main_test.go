@@ -40,6 +40,8 @@ func TestRejectsInvalidArguments(t *testing.T) {
 		{"ui-listen not loopback", []string{"--ui-listen", "0.0.0.0:8788"}, "must be a loopback address"},
 		{"ui-listen all interfaces", []string{"--ui-listen", ":8788"}, "must be a loopback address"},
 		{"ui-listen without port", []string{"--ui-listen", "localhost"}, "invalid --ui-listen"},
+		{"ui-token-file without ui-listen", []string{"--ui-token-file", "token"}, "--ui-token-file requires --ui-listen"},
+		{"ui-token-file unusable", []string{"--ui-listen", "127.0.0.1:0", "--ui-token-file", "/dev/null/ui-token"}, "invalid --ui-token-file"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -66,7 +68,7 @@ func TestHelpUsesDoubleDashFlags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, flag := range []string{"--listen", "--upstream", "--log-requests", "--log-responses", "--pretty", "--ui-listen", "--version", "--help"} {
+	for _, flag := range []string{"--listen", "--upstream", "--log-requests", "--log-responses", "--pretty", "--ui-listen", "--ui-token-file", "--version", "--help"} {
 		if !strings.Contains(out, flag) {
 			t.Errorf("help missing %s:\n%s", flag, out)
 		}
