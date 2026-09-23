@@ -85,7 +85,9 @@ var loginHTML []byte
 // Require serves a login page at /login and passes every other request to
 // next only when it carries the token, as the login cookie or as an
 // Authorization bearer token. Unauthenticated page loads are sent to the
-// login page; anything else gets 401.
+// login page; anything else gets 401. Cross-origin browser requests that
+// change state are refused, since SameSite=Lax still sends the cookie from
+// other ports of the same host.
 func Require(token string, next http.Handler) http.Handler {
 	valid := func(candidate string) bool {
 		return subtle.ConstantTimeCompare([]byte(candidate), []byte(token)) == 1
@@ -132,7 +134,7 @@ func Require(token string, next http.Handler) http.Handler {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="cc-proxy"`)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 	})
-	return mux
+	return http.NewCrossOriginProtection().Handler(mux)
 }
 
 func bearerOrCookie(r *http.Request) string {
