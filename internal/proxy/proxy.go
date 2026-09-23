@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/joncbenderkh/cc-proxy/internal/feed"
@@ -32,6 +33,10 @@ type Options struct {
 	// newest prompt, reply, usage and cost once the response has been
 	// relayed in full.
 	OnTurn func(feed.Turn)
+	// OnRequestSent, when set, receives the session id and decoded body of
+	// every POST /v1/messages request once it has been sent upstream in
+	// full. It runs on the transport's goroutine, so it must not block.
+	OnRequestSent func(sessionID string, request []byte)
 }
 
 // New returns a handler that forwards every request to upstream unchanged,
@@ -61,10 +66,19 @@ func logExchanges(next http.Handler, logger *slog.Logger, opts Options) http.Han
 		start := time.Now()
 		createsMessage := r.Method == http.MethodPost && r.URL.Path == "/v1/messages"
 		publishesTurn := createsMessage && opts.OnTurn != nil
+		reportsSent := createsMessage && opts.OnRequestSent != nil
 		var capture *requestCapture
-		if opts.LogRequests || publishesTurn {
+		if opts.LogRequests || publishesTurn || reportsSent {
 			capture = &requestCapture{}
 			r = r.WithContext(context.WithValue(r.Context(), captureKey{}, capture))
+		}
+		if reportsSent {
+			sessionID := r.Header.Get("X-Claude-Code-Session-Id")
+			capture.onSent = func(body []byte) {
+				if request, err := decode(body, capture.header.Get("Content-Encoding")); err == nil {
+					opts.OnRequestSent(sessionID, request)
+				}
+			}
 		}
 		recorder := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		if opts.LogResponses || createsMessage {
@@ -125,16 +139,22 @@ func logExchanges(next http.Handler, logger *slog.Logger, opts Options) http.Han
 type captureKey struct{}
 
 // requestCapture holds a copy of the outbound request. The body is copied
-// as the transport reads it, so forwarding is never delayed.
+// as the transport reads it, so forwarding is never delayed; onSent, when
+// set, receives the copy once the transport has read the body to its end.
 type requestCapture struct {
 	header http.Header
 	body   bytes.Buffer
+	onSent func(body []byte)
 }
 
 func (c *requestCapture) record(out *http.Request) {
 	c.header = redact(out.Header)
 	if out.Body != nil && out.Body != http.NoBody {
-		out.Body = teeReadCloser{Reader: io.TeeReader(out.Body, &c.body), Closer: out.Body}
+		tee := &teeReadCloser{Reader: io.TeeReader(out.Body, &c.body), Closer: out.Body}
+		if c.onSent != nil {
+			tee.atEOF = func() { c.onSent(c.body.Bytes()) }
+		}
+		out.Body = tee
 	}
 }
 
@@ -145,6 +165,16 @@ func (c *requestCapture) attrs() []any {
 type teeReadCloser struct {
 	io.Reader
 	io.Closer
+	atEOF func()
+	once  sync.Once
+}
+
+func (t *teeReadCloser) Read(p []byte) (int, error) {
+	n, err := t.Reader.Read(p)
+	if err == io.EOF && t.atEOF != nil {
+		t.once.Do(t.atEOF)
+	}
+	return n, err
 }
 
 // statusRecorder captures the status code and body size of a response, and

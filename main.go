@@ -38,6 +38,7 @@ import (
 	"github.com/joncbenderkh/cc-proxy/internal/history"
 	"github.com/joncbenderkh/cc-proxy/internal/prompt"
 	"github.com/joncbenderkh/cc-proxy/internal/proxy"
+	"github.com/joncbenderkh/cc-proxy/internal/transcript"
 )
 
 //go:embed VERSION
@@ -261,6 +262,16 @@ func serve(ctx context.Context, listen, uiListen, uiToken string, turns *history
 			hub.Restore(turns.Turns())
 		}
 		broker := approval.NewBroker(func(pending []approval.Request) { hub.SetState("approvals", pending) }, logger)
+		opts.OnRequestSent = func(sessionID string, request []byte) {
+			if sessionID == "" || !broker.Waiting(sessionID) {
+				return
+			}
+			go func() {
+				if calls, err := transcript.Answered(request); err == nil {
+					broker.Answered(sessionID, calls)
+				}
+			}()
+		}
 		mux := http.NewServeMux()
 		mux.Handle("/", hub.Handler())
 		broker.Register(mux)

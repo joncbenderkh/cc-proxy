@@ -143,3 +143,27 @@ func TestTruncateKeepsRunesWhole(t *testing.T) {
 		t.Fatal("short text changed")
 	}
 }
+
+func TestAnswered(t *testing.T) {
+	const request = `{"messages":[
+		{"role":"user","content":"list files"},
+		{"role":"assistant","content":[
+			{"type":"text","text":"Sure."},
+			{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"ls"}},
+			{"type":"tool_use","id":"toolu_2","name":"Read","input":{"file_path":"/a"}}]},
+		{"role":"user","content":[
+			{"type":"tool_result","tool_use_id":"toolu_1","content":"a b"},
+			{"type":"text","text":"<system-reminder>x</system-reminder>"}]}]}`
+	calls, err := Answered([]byte(request))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 1 || calls[0].ID != "toolu_1" || calls[0].Name != "Bash" || string(calls[0].Input) != `{"command":"ls"}` {
+		t.Fatalf("calls = %+v", calls)
+	}
+
+	calls, err = Answered([]byte(`{"messages":[{"role":"user","content":"hi"}]}`))
+	if err != nil || calls != nil {
+		t.Fatalf("plain prompt: calls = %+v, err = %v", calls, err)
+	}
+}
