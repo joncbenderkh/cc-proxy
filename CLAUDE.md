@@ -38,9 +38,33 @@ log the `x-api-key` / `Authorization` header values.
 
 ## Layout
 
-Not scaffolded yet. The full scaffold — source, `go.mod`, `VERSION`, CI and
-release workflows — is done in a dedicated session opened in this directory,
-using the `new-project` skill. Update this section once it exists.
+```
+main.go                  flags, server lifecycle, embeds VERSION
+VERSION                  single source of truth for the version
+internal/proxy/          transparent reverse proxy + per-exchange logging
+.github/workflows/       ci.yml (checks), release.yml (tag -> GitHub Release)
+```
+
+`proxy.New` wraps an `httputil.ReverseProxy` (`FlushInterval: -1`) in
+`http.Handler` middleware; future usage extraction and policy layers slot
+in as further middleware around it. Response-writer wrappers must implement
+`Unwrap()` so `http.ResponseController` can still flush streams.
+
+## Commands
+
+```
+go build -trimpath ./...                                   # build (CGO_ENABLED=0)
+go test ./...                                              # test
+go test -race ./...                                        # race test (needs cgo)
+gofmt -l .                                                 # format check
+go vet ./...                                               # vet
+go run honnef.co/go/tools/cmd/staticcheck@2026.2.1 ./...   # lint
+go run . -listen 127.0.0.1:8787                            # run locally
+```
+
+Releases: bump `VERSION`, merge, then tag `vX.Y.Z` on `main` and push the
+tag; `release.yml` verifies the tag matches `VERSION`, cross-compiles
+linux/darwin/windows x amd64/arm64, and publishes archives + checksums.
 
 ## Conventions
 
