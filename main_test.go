@@ -91,3 +91,18 @@ func TestIndentWriterPrettyPrintsRecords(t *testing.T) {
 		})
 	}
 }
+
+func TestLoggerSendsOnlyErrorsToStderr(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	logger := newLogger(&stdout, &stderr, false).With("component", "proxy")
+	logger.Info("exchange")
+	logger.Warn("slow upstream")
+	logger.Error("upstream request failed")
+
+	if got := strings.Count(stdout.String(), "\n"); got != 2 || strings.Contains(stdout.String(), "upstream request failed") {
+		t.Errorf("stdout = %q", stdout.String())
+	}
+	if got := stderr.String(); strings.Count(got, "\n") != 1 || !strings.Contains(got, `"msg":"upstream request failed"`) || !strings.Contains(got, `"component":"proxy"`) {
+		t.Errorf("stderr = %q", got)
+	}
+}

@@ -63,11 +63,7 @@ func newRootCommand() *cobra.Command {
 				return err
 			}
 			cmd.SilenceUsage = true
-			logOutput := cmd.ErrOrStderr()
-			if pretty {
-				logOutput = indentWriter{logOutput}
-			}
-			logger := slog.New(slog.NewJSONHandler(logOutput, nil))
+			logger := newLogger(cmd.OutOrStdout(), cmd.ErrOrStderr(), pretty)
 			return serve(cmd.Context(), listen, upstream, logger, cmd.Version, proxy.Options{LogRequests: logRequests, LogResponses: logResponses})
 		},
 	}
@@ -78,6 +74,47 @@ func newRootCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&logResponses, "log-responses", false, "log the headers and body of every response relayed to the client")
 	cmd.Flags().BoolVar(&pretty, "pretty", false, "pretty-print log records as indented JSON")
 	return cmd
+}
+
+// newLogger writes records to stdout, except errors, which go to stderr.
+func newLogger(stdout, stderr io.Writer, pretty bool) *slog.Logger {
+	if pretty {
+		stdout, stderr = indentWriter{stdout}, indentWriter{stderr}
+	}
+	return slog.New(levelSplitHandler{
+		below: slog.NewJSONHandler(stdout, nil),
+		above: slog.NewJSONHandler(stderr, nil),
+		split: slog.LevelError,
+	})
+}
+
+// levelSplitHandler sends records at or above split to one handler and
+// everything else to another.
+type levelSplitHandler struct {
+	below, above slog.Handler
+	split        slog.Level
+}
+
+func (h levelSplitHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	if level >= h.split {
+		return h.above.Enabled(ctx, level)
+	}
+	return h.below.Enabled(ctx, level)
+}
+
+func (h levelSplitHandler) Handle(ctx context.Context, record slog.Record) error {
+	if record.Level >= h.split {
+		return h.above.Handle(ctx, record)
+	}
+	return h.below.Handle(ctx, record)
+}
+
+func (h levelSplitHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return levelSplitHandler{below: h.below.WithAttrs(attrs), above: h.above.WithAttrs(attrs), split: h.split}
+}
+
+func (h levelSplitHandler) WithGroup(name string) slog.Handler {
+	return levelSplitHandler{below: h.below.WithGroup(name), above: h.above.WithGroup(name), split: h.split}
 }
 
 // indentWriter re-indents each JSON log record written through it. The

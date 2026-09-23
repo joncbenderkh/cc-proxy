@@ -74,6 +74,9 @@ go run . --log-responses                                   # also log response h
 go run . --pretty                                          # indented JSON log records
 ```
 
+Log records go to stdout as JSON lines; only error-level records (and CLI
+errors) go to stderr, so `cc-proxy > claude.log` captures the traffic log.
+
 Releases: bump `VERSION`, merge, then tag `vX.Y.Z` on `main` and push the
 tag; `release.yml` verifies the tag matches `VERSION`, cross-compiles
 linux/darwin/windows x amd64/arm64, and publishes archives + checksums.
