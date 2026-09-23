@@ -64,7 +64,9 @@ internal/feed/           in-memory turn hub, SSE /events, embedded web page
 internal/auth/           UI login token, cookie login, request guard
 internal/approval/       remote answers to PermissionRequest hooks
 internal/prompt/         remote prompts for idle sessions (Stop hooks)
+internal/push/           Web Push: VAPID key, subscriptions, encryption
 hook.go                  `cc-proxy hook stop`, the Stop hook command
+notify.go                which approvals and idle sessions become pushes
 .github/workflows/       ci.yml (checks), release.yml (tag -> GitHub Release)
 ```
 
@@ -155,6 +157,19 @@ variable is needed:
   "timeout": 86400
 }]}]}}
 ```
+
+Push notifications reach a phone without the page open. "Notify me" on
+the page subscribes the browser (standard Web Push, no third-party
+service beyond the browser's own push service); it needs a secure
+context, so use the `tailscale serve` URL, and on iOS 16.4+ the page must
+first be added to the Home Screen. A new permission prompt pushes at
+once; a session that has waited 60 s for its next prompt pushes with the
+start of Claude's last reply. Tapping a notification opens that session.
+The VAPID key (`vapid-key`) and the subscriptions
+(`push-subscriptions.json`) live 0600 in `<user config dir>/cc-proxy/`;
+the push package is stdlib only (RFC 8291 aes128gcm, RFC 8292 ES256
+tokens). `/sw.js`, `/manifest.webmanifest` and `/icon.png` are served
+without login, since browsers fetch them without cookies.
 
 Log records go to stdout as JSON lines; only error-level records (and CLI
 errors) go to stderr, so `cc-proxy > claude.log` captures the traffic log.

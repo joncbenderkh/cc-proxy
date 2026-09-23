@@ -24,6 +24,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -36,6 +37,7 @@ import (
 	"github.com/joncbenderkh/cc-proxy/internal/feed"
 	"github.com/joncbenderkh/cc-proxy/internal/prompt"
 	"github.com/joncbenderkh/cc-proxy/internal/proxy"
+	"github.com/joncbenderkh/cc-proxy/internal/push"
 	"github.com/joncbenderkh/cc-proxy/internal/transcript"
 )
 
@@ -83,12 +85,16 @@ func newRootCommand() *cobra.Command {
 			cmd.SilenceUsage = true
 			logger := newLogger(cmd.OutOrStdout(), cmd.ErrOrStderr(), pretty)
 			var token string
+			var notifications *push.Service
 			if uiListen != "" {
 				if token, err = loadUIToken(uiTokenFile, logger); err != nil {
 					return err
 				}
+				if notifications, err = openPush(logger); err != nil {
+					return err
+				}
 			}
-			return serve(cmd.Context(), listen, uiListen, token, upstream, logger, cmd.Version, proxy.Options{LogRequests: logRequests, LogResponses: logResponses})
+			return serve(cmd.Context(), listen, uiListen, token, notifications, upstream, logger, cmd.Version, proxy.Options{LogRequests: logRequests, LogResponses: logResponses})
 		},
 	}
 	cmd.SetVersionTemplate("cc-proxy {{.Version}}\n")
@@ -217,12 +223,30 @@ func parseUpstream(raw string) (*url.URL, error) {
 	return upstream, nil
 }
 
-func serve(ctx context.Context, listen, uiListen, uiToken string, upstream *url.URL, logger *slog.Logger, version string, opts proxy.Options) error {
+// openPush loads the push notification key and subscriptions, kept next to
+// the default token file.
+func openPush(logger *slog.Logger) (*push.Service, error) {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return nil, fmt.Errorf("locate push notification settings: %w", err)
+	}
+	service, err := push.Open(filepath.Join(dir, "cc-proxy"), logger)
+	if err != nil {
+		return nil, fmt.Errorf("push notifications: %w", err)
+	}
+	return service, nil
+}
+
+func serve(ctx context.Context, listen, uiListen, uiToken string, notifications *push.Service, upstream *url.URL, logger *slog.Logger, version string, opts proxy.Options) error {
 	var servers []*http.Server
 	if uiListen != "" {
 		hub := feed.NewHub(feedHistory)
 		opts.OnTurn = hub.Publish
-		broker := approval.NewBroker(func(pending []approval.Request) { hub.SetState("approvals", pending) }, logger)
+		notify := newNotifier(func(m push.Message) { notifications.Send(context.Background(), m) }, idleDelay)
+		broker := approval.NewBroker(func(pending []approval.Request) {
+			hub.SetState("approvals", pending)
+			notify.approvalsChanged(pending)
+		}, logger)
 		opts.OnRequestSent = func(sessionID string, request []byte) {
 			if sessionID == "" || !broker.Waiting(sessionID) {
 				return
@@ -236,13 +260,23 @@ func serve(ctx context.Context, listen, uiListen, uiToken string, upstream *url.
 		mux := http.NewServeMux()
 		mux.Handle("/", hub.Handler())
 		broker.Register(mux)
-		prompt.NewInbox(func(idle []prompt.Idle) { hub.SetState("idle", idle) }, logger).Register(mux)
+		prompt.NewInbox(func(idle []prompt.Idle) {
+			hub.SetState("idle", idle)
+			notify.idleChanged(idle)
+		}, logger).Register(mux)
+		notifications.Register(mux)
+		root := http.NewServeMux()
+		app := feed.AppFiles()
+		for _, path := range feed.AppPaths {
+			root.Handle("GET "+path, app)
+		}
+		root.Handle("/", auth.Require(uiToken, mux))
 		// Canceling the base context on shutdown releases held hooks, which
 		// hands permission prompts back to the terminal.
 		uiCtx, cancelUI := context.WithCancel(context.Background())
 		ui := &http.Server{
 			Addr:              uiListen,
-			Handler:           auth.Require(uiToken, mux),
+			Handler:           root,
 			ReadHeaderTimeout: 10 * time.Second,
 			BaseContext:       func(net.Listener) context.Context { return uiCtx },
 		}
