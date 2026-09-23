@@ -34,12 +34,16 @@ log the `x-api-key` / `Authorization` header values.
   (`net/http`, `net/http/httputil`, `encoding/json`, `log/slog`, `embed`);
   justify every non-stdlib dependency, and any storage driver must be pure Go
   so the cross-compile release matrix keeps working.
+- **CLI:** `github.com/spf13/cobra` (with `spf13/pflag`). Justification:
+  GNU-style `--long` flags, strict rejection of unknown flags, single-dash
+  long flags and stray positional arguments, and generated help; all pure
+  Go. Every flag value is validated before the server starts.
 - **Module path:** `github.com/joncbenderkh/cc-proxy`.
 
 ## Layout
 
 ```
-main.go                  flags, server lifecycle, embeds VERSION
+main.go                  cobra root command, flag validation, server lifecycle
 VERSION                  single source of truth for the version
 internal/proxy/          transparent reverse proxy + per-exchange logging
 .github/workflows/       ci.yml (checks), release.yml (tag -> GitHub Release)
@@ -59,7 +63,7 @@ go test -race ./...                                        # race test (needs cg
 gofmt -l .                                                 # format check
 go vet ./...                                               # vet
 go run honnef.co/go/tools/cmd/staticcheck@2026.2.1 ./...   # lint
-go run . -listen 127.0.0.1:8787                            # run locally
+go run . --listen 127.0.0.1:8787                           # run locally
 ```
 
 Releases: bump `VERSION`, merge, then tag `vX.Y.Z` on `main` and push the
