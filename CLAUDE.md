@@ -12,6 +12,12 @@ passed through.
 - **Now — observability:** log each request/response, extract model, token
   usage (input / output / cache read / cache write), latency, and computed
   cost; make that history inspectable.
+- **Next — remote control:** replace the Claude mobile app's Remote Control
+  functions, in order: (1) per-turn model / token / cost records; (2) a live
+  event feed plus a mobile web view; (3) authentication and remote access
+  (e.g. over Tailscale); (4) tool-permission approval via Claude Code hooks;
+  (5) prompt injection via the `Stop` hook. Traffic alone only observes a
+  session; steering it needs hooks.
 - **Later — policy / gateway:** budgets, rate limits, key management, and
   redaction, layered on the same pipeline. Design the request path so these
   can slot in without restructuring, but do not build them yet.
@@ -51,6 +57,8 @@ log the `x-api-key` / `Authorization` header values.
 main.go                  cobra root command, flag validation, server lifecycle
 VERSION                  single source of truth for the version
 internal/proxy/          transparent reverse proxy + per-exchange logging
+internal/sse/            server-sent event stream parsing
+internal/usage/          model / token / cost extraction and the price table
 .github/workflows/       ci.yml (checks), release.yml (tag -> GitHub Release)
 ```
 
@@ -74,6 +82,11 @@ go run . --log-responses                                   # also log response h
 go run . --pretty                                          # indented JSON log records
 ```
 
+Every successful `POST /v1/messages` exchange record carries a `message`
+object (`id`, `model`, `stop_reason`, `usage`, `cost_usd`), or a
+`message_error` when the response could not be read; `cost_usd` is omitted
+for models without a known price.
+
 Log records go to stdout as JSON lines; only error-level records (and CLI
 errors) go to stderr, so `cc-proxy > claude.log` captures the traffic log.
 
@@ -85,7 +98,8 @@ linux/darwin/windows x amd64/arm64, and publishes archives + checksums.
 
 - Keep usage/cost extraction pure and table-tested against recorded API
   responses (both JSON and SSE); confine network I/O to the proxy handler.
-- Pricing data lives in one place and carries the date it was last checked.
+- Pricing data lives in one place (`internal/usage/pricing.go`) and carries
+  the date it was last checked (`PricesCheckedOn`).
 
 ## Versioning
 
