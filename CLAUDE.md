@@ -98,7 +98,10 @@ for models without a known price. Records also carry `session_id` from the
 
 `--ui-listen` serves a mobile web page (`/`) and an SSE stream of turns
 (`/events`, resumable via `Last-Event-ID`) from an in-memory ring of the
-last 500 turns. Both require the token in `--ui-token-file` (default
+last 500 turns. The page opens on a list of sessions (project from the
+system prompt's working directory, title from the first prompt, status,
+activity and cost), sorted with those needing an answer first; a session
+opens at `#s=<session_id>`. Both require the token in `--ui-token-file` (default
 `<user config dir>/cc-proxy/ui-token`, created 0600 on first run; delete it
 to rotate): open `/login?token=…` or paste it into the login form once to
 get a 400-day HttpOnly cookie, or send `Authorization: Bearer …`. The token

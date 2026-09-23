@@ -312,7 +312,7 @@ func TestOnTurnReceivesPromptReplyAndUsage(t *testing.T) {
 	defer front.Close()
 
 	for _, path := range []string{"/v1/messages/count_tokens", "/v1/messages?beta=true"} {
-		req, _ := http.NewRequest(http.MethodPost, front.URL+path, strings.NewReader(`{"messages":[{"role":"user","content":"hello"}]}`))
+		req, _ := http.NewRequest(http.MethodPost, front.URL+path, strings.NewReader(`{"system":"Primary working directory: /work","messages":[{"role":"user","content":"hello"}]}`))
 		req.Header.Set("X-Claude-Code-Session-Id", "session-1")
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -333,7 +333,7 @@ func TestOnTurnReceivesPromptReplyAndUsage(t *testing.T) {
 	}
 	turn := got[0]
 	switch {
-	case turn.SessionID != "session-1", turn.Status != http.StatusOK:
+	case turn.SessionID != "session-1", turn.Status != http.StatusOK, turn.Cwd != "/work", turn.Title != "hello":
 		t.Errorf("turn = %+v", turn)
 	case len(turn.Prompt) != 1 || turn.Prompt[0].Text != "hello":
 		t.Errorf("prompt = %+v", turn.Prompt)

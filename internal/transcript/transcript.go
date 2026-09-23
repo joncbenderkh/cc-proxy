@@ -71,6 +71,51 @@ func Prompt(request []byte) ([]Block, error) {
 	return blocks, nil
 }
 
+// MaxTitle bounds a session title, in bytes.
+const MaxTitle = 200
+
+// Session describes the conversation a request belongs to.
+type Session struct {
+	// Cwd is the primary working directory named in the system prompt.
+	Cwd string
+	// Title is the first line of the first prompt the user typed.
+	Title string
+}
+
+const cwdMarker = "Primary working directory: "
+
+// SessionOf reads the working directory from a request's system prompt and
+// a title from its first user message. Text blocks that open with a tag,
+// such as <system-reminder> or <command-name>, are skipped for the title.
+func SessionOf(request []byte) (Session, error) {
+	var body struct {
+		System   json.RawMessage `json:"system"`
+		Messages []struct {
+			Role    string          `json:"role"`
+			Content json.RawMessage `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(request, &body); err != nil {
+		return Session{}, err
+	}
+	var session Session
+	if _, after, found := strings.Cut(joinText(contentBlocks(body.System)), cwdMarker); found {
+		line, _, _ := strings.Cut(after, "\n")
+		session.Cwd = strings.TrimSpace(line)
+	}
+	if len(body.Messages) > 0 && body.Messages[0].Role == "user" {
+		for _, raw := range contentBlocks(body.Messages[0].Content) {
+			text := strings.TrimSpace(raw.Text)
+			if raw.Type == "text" && text != "" && !strings.HasPrefix(text, "<") {
+				line, _, _ := strings.Cut(text, "\n")
+				session.Title = truncateTo(strings.TrimSpace(line), MaxTitle)
+				break
+			}
+		}
+	}
+	return session, nil
+}
+
 // ReplyJSON returns the text and tool_use blocks of a non-streaming
 // response body.
 func ReplyJSON(response []byte) ([]Block, error) {
@@ -173,10 +218,14 @@ func joinText(blocks []rawBlock) string {
 }
 
 func truncate(text string) string {
-	if len(text) <= MaxText {
+	return truncateTo(text, MaxText)
+}
+
+func truncateTo(text string, max int) string {
+	if len(text) <= max {
 		return text
 	}
-	cut := MaxText
+	cut := max
 	for cut > 0 && !utf8.RuneStart(text[cut]) {
 		cut--
 	}

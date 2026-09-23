@@ -25,6 +25,8 @@ type Turn struct {
 	Seq        int64              `json:"seq"`
 	Time       time.Time          `json:"time"`
 	SessionID  string             `json:"session_id,omitempty"`
+	Cwd        string             `json:"cwd,omitempty"`
+	Title      string             `json:"title,omitempty"`
 	Status     int                `json:"status"`
 	DurationMs int64              `json:"duration_ms"`
 	Message    *usage.Message     `json:"message,omitempty"`
