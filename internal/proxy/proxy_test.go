@@ -216,3 +216,74 @@ func TestLogResponsesRecordsRelayedResponse(t *testing.T) {
 		t.Errorf("request body logged without LogRequests: %v", record.RequestBody)
 	}
 }
+
+func TestRecordsMessageUsage(t *testing.T) {
+	const message = `{"type":"message","id":"msg_1","model":"claude-sonnet-5","stop_reason":"end_turn",` +
+		`"usage":{"input_tokens":1000000,"output_tokens":0}}`
+	const stream = "event: message_start\n" +
+		`data: {"type":"message_start","message":{"id":"msg_2","model":"claude-sonnet-5","usage":{"input_tokens":1000000,"output_tokens":1}}}` + "\n\n" +
+		"event: message_delta\n" +
+		`data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":100000}}` + "\n\n"
+
+	tests := []struct {
+		name        string
+		path        string
+		status      int
+		contentType string
+		body        []byte
+		gzip        bool
+		want        string
+		wantErr     bool
+	}{
+		{"json", "/v1/messages", http.StatusOK, "application/json", []byte(message), false,
+			`{"id":"msg_1","model":"claude-sonnet-5","stop_reason":"end_turn","usage":{"input_tokens":1000000,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0},"cost_usd":2}`, false},
+		{"gzip sse with query", "/v1/messages?beta=true", http.StatusOK, "text/event-stream", []byte(stream), true,
+			`{"id":"msg_2","model":"claude-sonnet-5","stop_reason":"tool_use","usage":{"input_tokens":1000000,"output_tokens":100000,"cache_creation_input_tokens":0,"cache_read_input_tokens":0},"cost_usd":3}`, false},
+		{"unreadable body", "/v1/messages", http.StatusOK, "text/plain", []byte("oops"), false, "", true},
+		{"error status", "/v1/messages", http.StatusTooManyRequests, "application/json", []byte(`{"type":"error"}`), false, "", false},
+		{"count tokens", "/v1/messages/count_tokens", http.StatusOK, "application/json", []byte(`{"input_tokens":5}`), false, "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := tt.body
+			if tt.gzip {
+				body = gzipped(t, string(tt.body))
+			}
+			front, logs := newProxy(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", tt.contentType)
+				if tt.gzip {
+					w.Header().Set("Content-Encoding", "gzip")
+				}
+				w.WriteHeader(tt.status)
+				w.Write(body)
+			}), Options{})
+
+			req, _ := http.NewRequest(http.MethodPost, front.URL+tt.path, strings.NewReader(`{}`))
+			req.Header.Set("Accept-Encoding", "gzip")
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			front.Close()
+
+			if !bytes.Equal(got, body) {
+				t.Fatalf("client received altered body %q", got)
+			}
+			var record struct {
+				Message      json.RawMessage `json:"message"`
+				MessageError string          `json:"message_error"`
+			}
+			if err := json.Unmarshal(logs.Bytes(), &record); err != nil {
+				t.Fatalf("decode log %q: %v", logs, err)
+			}
+			if string(record.Message) != tt.want {
+				t.Errorf("message = %s\nwant      %s", record.Message, tt.want)
+			}
+			if (record.MessageError != "") != tt.wantErr {
+				t.Errorf("message_error = %q, wantErr %v", record.MessageError, tt.wantErr)
+			}
+		})
+	}
+}
