@@ -16,6 +16,7 @@ import (
 	"github.com/andybalholm/brotli"
 
 	"github.com/joncbenderkh/cc-proxy/internal/sse"
+	"github.com/joncbenderkh/cc-proxy/internal/transcript"
 	"github.com/joncbenderkh/cc-proxy/internal/usage"
 )
 
@@ -61,25 +62,36 @@ func loggableBody(body []byte, header http.Header) any {
 	return jsonOrString(decoded)
 }
 
-// messageAttrs reports the model, usage and cost of a Messages API
-// response, or why they could not be read.
-func messageAttrs(body []byte, header http.Header) []any {
-	message, err := readMessage(body, header)
-	if err != nil {
-		return []any{"message_error", err.Error()}
-	}
-	return []any{"message", message}
+// messageResponse is what a Messages API response body reports: the
+// model, usage and cost (or why they could not be read) and the reply.
+type messageResponse struct {
+	message usage.Message
+	err     error
+	reply   []transcript.Block
 }
 
-func readMessage(body []byte, header http.Header) (usage.Message, error) {
+func readMessageResponse(body []byte, header http.Header) messageResponse {
 	decoded, err := decode(body, header.Get("Content-Encoding"))
 	if err != nil {
-		return usage.Message{}, err
+		return messageResponse{err: err}
 	}
+	var response messageResponse
 	if isEventStream(header) {
-		return usage.FromStream(sse.Parse(decoded))
+		events := sse.Parse(decoded)
+		response.message, response.err = usage.FromStream(events)
+		response.reply, _ = transcript.ReplyStream(events)
+	} else {
+		response.message, response.err = usage.FromJSON(decoded)
+		response.reply, _ = transcript.ReplyJSON(decoded)
 	}
-	return usage.FromJSON(decoded)
+	return response
+}
+
+func (m messageResponse) attrs() []any {
+	if m.err != nil {
+		return []any{"message_error", m.err.Error()}
+	}
+	return []any{"message", m.message}
 }
 
 func isEventStream(header http.Header) bool {

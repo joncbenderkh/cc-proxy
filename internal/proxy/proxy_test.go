@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/joncbenderkh/cc-proxy/internal/feed"
 )
 
 const secretKey = "sk-ant-test-secret"
@@ -285,5 +287,59 @@ func TestRecordsMessageUsage(t *testing.T) {
 				t.Errorf("message_error = %q, wantErr %v", record.MessageError, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestOnTurnReceivesPromptReplyAndUsage(t *testing.T) {
+	const stream = "event: message_start\n" +
+		`data: {"type":"message_start","message":{"id":"msg_1","model":"claude-sonnet-5","usage":{"input_tokens":10,"output_tokens":1}}}` + "\n\n" +
+		"event: content_block_start\n" +
+		`data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}` + "\n\n" +
+		"event: content_block_delta\n" +
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi there"}}` + "\n\n" +
+		"event: message_delta\n" +
+		`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":3}}` + "\n\n"
+
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.Copy(io.Discard, r.Body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, stream)
+	}))
+	defer backend.Close()
+	target, _ := url.Parse(backend.URL)
+	turns := make(chan feed.Turn, 2)
+	front := httptest.NewServer(New(target, slog.New(slog.NewJSONHandler(io.Discard, nil)), Options{OnTurn: func(turn feed.Turn) { turns <- turn }}))
+	defer front.Close()
+
+	for _, path := range []string{"/v1/messages/count_tokens", "/v1/messages?beta=true"} {
+		req, _ := http.NewRequest(http.MethodPost, front.URL+path, strings.NewReader(`{"messages":[{"role":"user","content":"hello"}]}`))
+		req.Header.Set("X-Claude-Code-Session-Id", "session-1")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}
+	front.Close()
+	close(turns)
+
+	var got []feed.Turn
+	for turn := range turns {
+		got = append(got, turn)
+	}
+	if len(got) != 1 {
+		t.Fatalf("published %d turns, want 1 (count_tokens excluded)", len(got))
+	}
+	turn := got[0]
+	switch {
+	case turn.SessionID != "session-1", turn.Status != http.StatusOK:
+		t.Errorf("turn = %+v", turn)
+	case len(turn.Prompt) != 1 || turn.Prompt[0].Text != "hello":
+		t.Errorf("prompt = %+v", turn.Prompt)
+	case len(turn.Reply) != 1 || turn.Reply[0].Text != "Hi there":
+		t.Errorf("reply = %+v", turn.Reply)
+	case turn.Message == nil || turn.Message.StopReason != "end_turn" || turn.Message.Usage.OutputTokens != 3:
+		t.Errorf("message = %+v", turn.Message)
 	}
 }
