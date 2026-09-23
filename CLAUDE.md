@@ -65,6 +65,7 @@ go vet ./...                                               # vet
 go run honnef.co/go/tools/cmd/staticcheck@2026.2.1 ./...   # lint
 go run . --listen 127.0.0.1:8787                           # run locally
 go run . --log-requests                                    # also log outbound headers + bodies
+go run . --pretty                                          # indented JSON log records
 ```
 
 Releases: bump `VERSION`, merge, then tag `vX.Y.Z` on `main` and push the

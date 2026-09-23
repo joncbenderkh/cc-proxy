@@ -35,6 +35,7 @@ func TestRejectsInvalidArguments(t *testing.T) {
 		{"upstream unsupported scheme", []string{"--upstream", "ftp://api.anthropic.com"}, "scheme must be http or https"},
 		{"single-dash log-requests", []string{"-log-requests"}, "unknown shorthand flag"},
 		{"log-requests with value", []string{"--log-requests=maybe"}, "invalid argument"},
+		{"pretty with value", []string{"--pretty=yes"}, "invalid argument"},
 		{"upstream without host", []string{"--upstream", "https://"}, "missing host"},
 	}
 	for _, tt := range tests {
@@ -62,9 +63,31 @@ func TestHelpUsesDoubleDashFlags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, flag := range []string{"--listen", "--upstream", "--log-requests", "--version", "--help"} {
+	for _, flag := range []string{"--listen", "--upstream", "--log-requests", "--pretty", "--version", "--help"} {
 		if !strings.Contains(out, flag) {
 			t.Errorf("help missing %s:\n%s", flag, out)
 		}
+	}
+}
+
+func TestIndentWriterPrettyPrintsRecords(t *testing.T) {
+	tests := []struct {
+		name, record, want string
+	}{
+		{"json record", `{"msg":"exchange","request_body":{"model":"claude-sonnet-5"}}` + "\n",
+			"{\n  \"msg\": \"exchange\",\n  \"request_body\": {\n    \"model\": \"claude-sonnet-5\"\n  }\n}\n"},
+		{"non-json passes through", "not json\n", "not json\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var out bytes.Buffer
+			n, err := indentWriter{&out}.Write([]byte(tt.record))
+			if err != nil || n != len(tt.record) {
+				t.Fatalf("Write = %d, %v", n, err)
+			}
+			if out.String() != tt.want {
+				t.Fatalf("output = %q, want %q", out.String(), tt.want)
+			}
+		})
 	}
 }
