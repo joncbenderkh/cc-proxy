@@ -29,6 +29,7 @@ type Turn struct {
 	Remote     string             `json:"remote,omitempty"`
 	Branch     string             `json:"branch,omitempty"`
 	Title      string             `json:"title,omitempty"`
+	User       string             `json:"user,omitempty"`
 	Status     int                `json:"status"`
 	DurationMs int64              `json:"duration_ms"`
 	Message    *usage.Message     `json:"message,omitempty"`

@@ -122,7 +122,7 @@ func logExchanges(next http.Handler, logger *slog.Logger, opts Options) http.Han
 			if request, err := decode(capture.body.Bytes(), capture.header.Get("Content-Encoding")); err == nil {
 				turn.Prompt, _ = transcript.Prompt(request)
 				if session, err := transcript.SessionOf(request); err == nil {
-					turn.Cwd, turn.Title = session.Cwd, session.Title
+					turn.Cwd, turn.Title, turn.User = session.Cwd, session.Title, session.User
 					if session.Cwd != "" {
 						if repo, ok := gitrepo.Find(session.Cwd); ok {
 							turn.Remote, turn.Branch = repo.Remote, repo.Branch

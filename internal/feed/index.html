@@ -251,6 +251,7 @@ function renderSession(session) {
   if (session.turns) meta.append(el("span", "", session.turns + (session.turns === 1 ? " turn" : " turns")));
   if (session.cost) meta.append(el("span", "", usd(session.cost)));
   if (session.model) meta.append(el("span", "", shortModel(session.model)));
+  if (session.user) meta.append(el("span", "", session.user));
   meta.append(el("span", "", session.id.slice(0, 8)));
   card.append(meta);
   if (session.cwd) card.title = session.cwd;
@@ -321,12 +322,13 @@ function track(entry, isTurn) {
   if (!entry.session_id) return;
   let session = sessions.get(entry.session_id);
   if (!session) {
-    session = { id: entry.session_id, cwd: "", remote: "", branch: "", title: "", last: entry.time, turns: 0, cost: 0, model: "", stop: "" };
+    session = { id: entry.session_id, cwd: "", remote: "", branch: "", user: "", title: "", last: entry.time, turns: 0, cost: 0, model: "", stop: "" };
     sessions.set(entry.session_id, session);
   }
   if (new Date(entry.time) > new Date(session.last)) session.last = entry.time;
   if (!session.cwd && entry.cwd) session.cwd = entry.cwd;
   if (!isTurn) return;
+  if (entry.user) session.user = entry.user;
   if (entry.branch) { session.remote = entry.remote || ""; session.branch = entry.branch; }
   if (!session.title && entry.title && entry.cwd) session.title = entry.title;
   session.turns++;

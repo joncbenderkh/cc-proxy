@@ -120,13 +120,20 @@ type Session struct {
 	Cwd string
 	// Title is the first line of the first prompt the user typed.
 	Title string
+	// User is the Claude account email Claude Code adds to the first
+	// message as context.
+	User string
 }
 
-const cwdMarker = "Primary working directory: "
+const (
+	cwdMarker  = "Primary working directory: "
+	userMarker = "The user's email address is "
+)
 
-// SessionOf reads the working directory from a request's system prompt and
-// a title from its first user message. Text blocks that open with a tag,
-// such as <system-reminder> or <command-name>, are skipped for the title.
+// SessionOf reads the working directory from a request's system prompt,
+// and a title and the account email from its first user message. Text
+// blocks that open with a tag, such as <system-reminder> or
+// <command-name>, are skipped for the title.
 func SessionOf(request []byte) (Session, error) {
 	var body struct {
 		System   json.RawMessage `json:"system"`
@@ -145,11 +152,17 @@ func SessionOf(request []byte) (Session, error) {
 	}
 	if len(body.Messages) > 0 && body.Messages[0].Role == "user" {
 		for _, raw := range contentBlocks(body.Messages[0].Content) {
+			if raw.Type != "text" {
+				continue
+			}
 			text := strings.TrimSpace(raw.Text)
-			if raw.Type == "text" && text != "" && !strings.HasPrefix(text, "<") {
+			if _, after, found := strings.Cut(text, userMarker); found && session.User == "" {
+				email, _, _ := strings.Cut(after, " ")
+				session.User = truncateTo(strings.TrimRight(strings.TrimSpace(email), "."), MaxTitle)
+			}
+			if session.Title == "" && text != "" && !strings.HasPrefix(text, "<") {
 				line, _, _ := strings.Cut(text, "\n")
 				session.Title = truncateTo(strings.TrimSpace(line), MaxTitle)
-				break
 			}
 		}
 	}
