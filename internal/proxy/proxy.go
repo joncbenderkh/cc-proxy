@@ -17,6 +17,7 @@ import (
 
 	"github.com/joncbenderkh/cc-proxy/internal/feed"
 	"github.com/joncbenderkh/cc-proxy/internal/gitrepo"
+	"github.com/joncbenderkh/cc-proxy/internal/sessionlog"
 	"github.com/joncbenderkh/cc-proxy/internal/transcript"
 )
 
@@ -63,11 +64,18 @@ func New(upstream *url.URL, logger *slog.Logger, opts Options) http.Handler {
 }
 
 func logExchanges(next http.Handler, logger *slog.Logger, opts Options) http.Handler {
+	var seenSessions sync.Map
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
+		sessionID := r.Header.Get("X-Claude-Code-Session-Id")
 		createsMessage := r.Method == http.MethodPost && r.URL.Path == "/v1/messages"
 		publishesTurn := createsMessage && opts.OnTurn != nil
 		reportsSent := createsMessage && opts.OnRequestSent != nil
+		if opts.OnTurn != nil && sessionID != "" {
+			if _, seen := seenSessions.LoadOrStore(sessionID, struct{}{}); !seen {
+				go backfillSession(opts.OnTurn, sessionID)
+			}
+		}
 		var capture *requestCapture
 		if opts.LogRequests || publishesTurn || reportsSent {
 			capture = &requestCapture{}
@@ -87,7 +95,6 @@ func logExchanges(next http.Handler, logger *slog.Logger, opts Options) http.Han
 		}
 		next.ServeHTTP(recorder, r)
 		duration := time.Since(start)
-		sessionID := r.Header.Get("X-Claude-Code-Session-Id")
 
 		attrs := []any{
 			"method", r.Method,
@@ -140,6 +147,34 @@ func logExchanges(next http.Handler, logger *slog.Logger, opts Options) http.Han
 		}
 		logger.Info("exchange", attrs...)
 	})
+}
+
+// backfillSession publishes what Claude Code's own local transcript of
+// sessionID already knows — cwd, branch, title, account email — as soon
+// as the session is first seen, without waiting for one of its requests
+// to complete. It runs off the request path since it reads a file from
+// disk; a session with no local transcript, such as one authenticating
+// with an API key rather than the Claude Code CLI, publishes nothing.
+func backfillSession(onTurn func(feed.Turn), sessionID string) {
+	session, ok := sessionlog.Find(sessionID)
+	if !ok {
+		return
+	}
+	turn := feed.Turn{
+		Time:      time.Now(),
+		SessionID: sessionID,
+		Backfill:  true,
+		Cwd:       session.Cwd,
+		Branch:    session.Branch,
+		Title:     session.Title,
+		User:      session.User,
+	}
+	if session.Cwd != "" {
+		if repo, ok := gitrepo.Find(session.Cwd); ok {
+			turn.Remote = repo.Remote
+		}
+	}
+	onTurn(turn)
 }
 
 type captureKey struct{}

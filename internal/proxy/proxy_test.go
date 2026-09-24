@@ -11,11 +11,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/joncbenderkh/cc-proxy/internal/feed"
+	"github.com/joncbenderkh/cc-proxy/internal/sessionlog"
 )
 
 const secretKey = "sk-ant-test-secret"
@@ -383,5 +386,62 @@ func TestOnRequestSentBeforeResponse(t *testing.T) {
 	close(release)
 	if err := <-done; err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestBackfillsSessionFromLocalTranscript(t *testing.T) {
+	sessionsDir := t.TempDir()
+	sessionDir := filepath.Join(sessionsDir, "-home-u-proj")
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	transcriptBody := `{"type":"user","message":{"role":"user","content":"fix it"},"cwd":"/home/u/proj","gitBranch":"feat"}` + "\n"
+	if err := os.WriteFile(filepath.Join(sessionDir, "session-1.jsonl"), []byte(transcriptBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	original := sessionlog.Dir
+	sessionlog.Dir = sessionsDir
+	defer func() { sessionlog.Dir = original }()
+
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.Copy(io.Discard, r.Body)
+		w.Write([]byte(`{"id":"msg_1"}`))
+	}))
+	defer backend.Close()
+	target, _ := url.Parse(backend.URL)
+	turns := make(chan feed.Turn, 2)
+	front := httptest.NewServer(New(target, slog.New(slog.NewJSONHandler(io.Discard, nil)), Options{OnTurn: func(turn feed.Turn) { turns <- turn }}))
+	defer front.Close()
+
+	for i := 0; i < 2; i++ {
+		req, _ := http.NewRequest(http.MethodPost, front.URL+"/v1/messages", strings.NewReader(`{"messages":[{"role":"user","content":"hi"}]}`))
+		req.Header.Set("X-Claude-Code-Session-Id", "session-1")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}
+
+	var backfills, real int
+	timeout := time.After(2 * time.Second)
+	for backfills+real < 3 {
+		select {
+		case turn := <-turns:
+			if turn.Backfill {
+				backfills++
+				if turn.SessionID != "session-1" || turn.Cwd != "/home/u/proj" || turn.Branch != "feat" || turn.Title != "fix it" {
+					t.Errorf("backfill turn = %+v", turn)
+				}
+			} else {
+				real++
+			}
+		case <-timeout:
+			t.Fatalf("got %d backfills and %d real turns before timeout, want 1 and 2", backfills, real)
+		}
+	}
+	if backfills != 1 {
+		t.Errorf("backfills = %d, want 1 (only the first request for a session backfills)", backfills)
 	}
 }

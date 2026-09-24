@@ -327,10 +327,10 @@ function track(entry, isTurn) {
   }
   if (new Date(entry.time) > new Date(session.last)) session.last = entry.time;
   if (!session.cwd && entry.cwd) session.cwd = entry.cwd;
-  if (!isTurn) return;
   if (entry.user) session.user = entry.user;
   if (entry.branch) { session.remote = entry.remote || ""; session.branch = entry.branch; }
   if (!session.title && entry.title && entry.cwd) session.title = entry.title;
+  if (!isTurn) return;
   session.turns++;
   const message = entry.message;
   if (message) {
@@ -476,8 +476,13 @@ events.addEventListener("idle", event => {
   showComposer();
 });
 events.addEventListener("turn", event => {
-  const follow = nearBottom();
   const turn = JSON.parse(event.data);
+  if (turn.backfill) {
+    track(turn, false);
+    if (!selectedSession()) showSessions();
+    return;
+  }
+  const follow = nearBottom();
   turns.push(turn);
   track(turn, true);
   redraw();

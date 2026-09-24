@@ -22,14 +22,19 @@ import (
 
 // Turn is one Messages API exchange as the feed shows it.
 type Turn struct {
-	Seq        int64              `json:"seq"`
-	Time       time.Time          `json:"time"`
-	SessionID  string             `json:"session_id,omitempty"`
-	Cwd        string             `json:"cwd,omitempty"`
-	Remote     string             `json:"remote,omitempty"`
-	Branch     string             `json:"branch,omitempty"`
-	Title      string             `json:"title,omitempty"`
-	User       string             `json:"user,omitempty"`
+	Seq       int64     `json:"seq"`
+	Time      time.Time `json:"time"`
+	SessionID string    `json:"session_id,omitempty"`
+	Cwd       string    `json:"cwd,omitempty"`
+	Remote    string    `json:"remote,omitempty"`
+	Branch    string    `json:"branch,omitempty"`
+	Title     string    `json:"title,omitempty"`
+	User      string    `json:"user,omitempty"`
+	// Backfill marks a turn synthesized from Claude Code's local session
+	// transcript rather than from an observed exchange: it carries only
+	// session metadata (cwd, remote, branch, title, user), never counts
+	// toward a session's turn count, and is never shown in its timeline.
+	Backfill   bool               `json:"backfill,omitempty"`
 	Status     int                `json:"status"`
 	DurationMs int64              `json:"duration_ms"`
 	Message    *usage.Message     `json:"message,omitempty"`
