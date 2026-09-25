@@ -65,7 +65,9 @@ internal/history/        feed turns kept in a JSON Lines file across restarts
 internal/auth/           UI login token, cookie login, request guard
 internal/approval/       remote answers to PermissionRequest hooks
 internal/prompt/         remote prompts for idle sessions (Stop hooks)
+internal/push/           Web Push: VAPID key, subscriptions, encryption
 hook.go                  `cc-proxy hook stop`, the Stop hook command
+notify.go                which approvals and idle sessions become pushes
 .github/workflows/       ci.yml (checks), release.yml (tag -> GitHub Release)
 ```
 
@@ -115,12 +117,16 @@ accepts loopback addresses; reach it from a phone with `tailscale serve`,
 which adds TLS.
 
 The UI server also answers Claude Code `PermissionRequest` HTTP hooks at
-`POST /hooks/permission-request` (bearer token required). While a viewer
-has the page open, the hook is held and the prompt appears on the page
-with Allow / Deny / Always allow (the suggested `addRules` allow entries
-only); `POST /approvals/{id}` records the answer. With no viewer, once the
-last viewer has been gone for 15 s, or on shutdown, the hook returns an
-empty 200 and Claude Code falls back to its terminal prompt. Approval log
+`POST /hooks/permission-request` (bearer token required). The hook is
+held and the prompt appears on the page with Allow / Deny / Always allow
+(the suggested `addRules` allow entries only); `POST /approvals/{id}`
+records the answer. Claude Code shows its terminal dialog at the same
+time, and the first answer wins. Claude Code keeps the hook request open
+after a terminal answer, so the proxy watches each `/v1/messages` request
+as it goes upstream: once it carries the tool call's result, the prompt is
+withdrawn from the page and the hook gets an empty 200 (matched by
+`tool_use_id` when the hook input has one, else by tool name and input).
+On shutdown the hook also returns an empty 200. Approval log
 records carry the tool name and outcome, never the tool input. Hook setup
 in `~/.claude/settings.json`, with `CC_PROXY_UI_TOKEN` exported from the
 token file:
@@ -156,6 +162,19 @@ variable is needed:
   "timeout": 86400
 }]}]}}
 ```
+
+Push notifications reach a phone without the page open. "Notify me" on
+the page subscribes the browser (standard Web Push, no third-party
+service beyond the browser's own push service); it needs a secure
+context, so use the `tailscale serve` URL, and on iOS 16.4+ the page must
+first be added to the Home Screen. A new permission prompt pushes at
+once; a session that has waited 60 s for its next prompt pushes with the
+start of Claude's last reply. Tapping a notification opens that session.
+The VAPID key (`vapid-key`) and the subscriptions
+(`push-subscriptions.json`) live 0600 in `<user config dir>/cc-proxy/`;
+the push package is stdlib only (RFC 8291 aes128gcm, RFC 8292 ES256
+tokens). `/sw.js`, `/manifest.webmanifest` and `/icon.png` are served
+without login, since browsers fetch them without cookies.
 
 Log records go to stdout as JSON lines; only error-level records (and CLI
 errors) go to stderr, so `cc-proxy > claude.log` captures the traffic log.

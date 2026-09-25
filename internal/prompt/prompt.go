@@ -23,6 +23,9 @@ type Idle struct {
 	SessionID string    `json:"session_id"`
 	Time      time.Time `json:"time"`
 	Cwd       string    `json:"cwd,omitempty"`
+	// Reply is Claude's last message before it stopped. Viewers read it in
+	// the feed; notifications quote it.
+	Reply string `json:"-"`
 }
 
 // Outcome is how a wait ended.
@@ -129,6 +132,8 @@ type hookInput struct {
 	HookEventName string `json:"hook_event_name"`
 	SessionID     string `json:"session_id"`
 	Cwd           string `json:"cwd"`
+	// LastAssistantMessage is the text of Claude's final reply.
+	LastAssistantMessage string `json:"last_assistant_message"`
 }
 
 // HookAnswer is the hook endpoint's reply when a viewer sent a prompt.
@@ -149,7 +154,7 @@ func (in *Inbox) serveHook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	start := time.Now()
-	text, outcome := in.Wait(r.Context(), Idle{SessionID: input.SessionID, Time: start, Cwd: input.Cwd})
+	text, outcome := in.Wait(r.Context(), Idle{SessionID: input.SessionID, Time: start, Cwd: input.Cwd, Reply: input.LastAssistantMessage})
 	in.logger.Info("prompt",
 		"session_id", input.SessionID,
 		"outcome", string(outcome),

@@ -2,8 +2,11 @@
 
 // Package approval lets a remote viewer answer Claude Code permission
 // prompts. A PermissionRequest HTTP hook waits here until a viewer allows
-// or denies the tool call; without a viewer the prompt goes back to the
-// terminal.
+// or denies the tool call. Claude Code shows its terminal dialog at the
+// same time, so whichever answer comes first wins. Claude Code keeps the
+// hook request open after an answer in the terminal, so the proxy reports
+// the tool results each request sends upstream, and the broker withdraws
+// the prompts they answer.
 package approval
 
 import (
@@ -13,9 +16,12 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"reflect"
 	"slices"
 	"sync"
 	"time"
+
+	"github.com/joncbenderkh/cc-proxy/internal/transcript"
 )
 
 // Request is a pending permission prompt as viewers see it.
@@ -26,6 +32,7 @@ type Request struct {
 	Cwd       string          `json:"cwd,omitempty"`
 	ToolName  string          `json:"tool_name"`
 	ToolInput json.RawMessage `json:"tool_input,omitempty"`
+	ToolUseID string          `json:"tool_use_id,omitempty"`
 	// Always holds the allow rules Claude Code suggested; allowing with
 	// Decision.Always adds them, like "don't ask again" in the terminal.
 	Always []json.RawMessage `json:"always,omitempty"`
@@ -44,9 +51,10 @@ const (
 	Allowed       Outcome = "allow"
 	AllowedAlways Outcome = "allow_always"
 	Denied        Outcome = "deny"
-	NoViewer      Outcome = "no_viewer"
-	ViewerLeft    Outcome = "viewer_left"
 	Canceled      Outcome = "canceled"
+	// AnsweredElsewhere means the tool call's result went upstream, so the
+	// terminal dialog answered it first.
+	AnsweredElsewhere Outcome = "answered_elsewhere"
 )
 
 // ErrNotPending is returned for a decision on a request that was already
@@ -58,13 +66,8 @@ const DeniedMessage = "The user denied this tool call from the cc-proxy web page
 
 // Broker holds the pending permission prompts.
 type Broker struct {
-	viewers func() int
 	publish func([]Request)
 	logger  *slog.Logger
-	// grace is how long a prompt waits once the last viewer has left, so a
-	// phone that briefly drops its connection keeps the prompt.
-	grace        time.Duration
-	pollInterval time.Duration
 
 	mu      sync.Mutex
 	pending []*waiter
@@ -73,54 +76,82 @@ type Broker struct {
 type waiter struct {
 	request  Request
 	decision chan Decision
+	answered chan struct{}
 }
 
-// NewBroker returns a broker that holds prompts only while viewers()
-// reports a connected viewer, and reports every change to the pending
+// NewBroker returns a broker that reports every change to the pending
 // list through publish.
-func NewBroker(viewers func() int, publish func([]Request), logger *slog.Logger) *Broker {
-	b := &Broker{viewers: viewers, publish: publish, logger: logger, grace: 15 * time.Second, pollInterval: time.Second}
+func NewBroker(publish func([]Request), logger *slog.Logger) *Broker {
+	b := &Broker{publish: publish, logger: logger}
 	b.publishLocked()
 	return b
 }
 
-// Wait holds request until a viewer decides it, every viewer has been gone
-// for the grace period, or ctx ends.
+// Wait holds request until a viewer decides it or ctx ends.
 func (b *Broker) Wait(ctx context.Context, request Request) (Decision, Outcome) {
-	if b.viewers() == 0 {
-		return Decision{}, NoViewer
-	}
-	w := &waiter{request: request, decision: make(chan Decision, 1)}
+	w := &waiter{request: request, decision: make(chan Decision, 1), answered: make(chan struct{})}
 	b.mu.Lock()
 	b.pending = append(b.pending, w)
 	b.publishLocked()
 	b.mu.Unlock()
 	defer b.remove(w)
 
-	poll := time.NewTicker(b.pollInterval)
-	defer poll.Stop()
-	lastSeen := time.Now()
-	for {
-		select {
-		case d := <-w.decision:
-			switch {
-			case d.Behavior == "deny":
-				return d, Denied
-			case d.Always:
-				return d, AllowedAlways
-			default:
-				return d, Allowed
-			}
-		case <-ctx.Done():
-			return Decision{}, Canceled
-		case now := <-poll.C:
-			if b.viewers() > 0 {
-				lastSeen = now
-			} else if now.Sub(lastSeen) >= b.grace {
-				return Decision{}, ViewerLeft
-			}
+	select {
+	case d := <-w.decision:
+		switch {
+		case d.Behavior == "deny":
+			return d, Denied
+		case d.Always:
+			return d, AllowedAlways
+		default:
+			return d, Allowed
 		}
+	case <-w.answered:
+		return Decision{}, AnsweredElsewhere
+	case <-ctx.Done():
+		return Decision{}, Canceled
 	}
+}
+
+// Waiting reports whether the session has a pending request.
+func (b *Broker) Waiting(sessionID string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return slices.ContainsFunc(b.pending, func(w *waiter) bool { return w.request.SessionID == sessionID })
+}
+
+// Answered withdraws the session's pending requests for the given tool
+// calls, whose results have already gone upstream. A request matches by
+// tool use id when the hook input carried one, else by tool name and input.
+func (b *Broker) Answered(sessionID string, calls []transcript.ToolUse) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	remaining := b.pending[:0]
+	for _, w := range b.pending {
+		if w.request.SessionID == sessionID && slices.ContainsFunc(calls, w.request.answeredBy) {
+			close(w.answered)
+			continue
+		}
+		remaining = append(remaining, w)
+	}
+	if len(remaining) == len(b.pending) {
+		return
+	}
+	clear(b.pending[len(remaining):])
+	b.pending = remaining
+	b.publishLocked()
+}
+
+func (r Request) answeredBy(call transcript.ToolUse) bool {
+	if r.ToolUseID != "" {
+		return r.ToolUseID == call.ID
+	}
+	return r.ToolName == call.Name && sameJSON(r.ToolInput, call.Input)
+}
+
+func sameJSON(a, b json.RawMessage) bool {
+	var x, y any
+	return json.Unmarshal(a, &x) == nil && json.Unmarshal(b, &y) == nil && reflect.DeepEqual(x, y)
 }
 
 // Decide answers the pending request with the given id.
@@ -168,6 +199,7 @@ type hookInput struct {
 	Cwd                   string            `json:"cwd"`
 	ToolName              string            `json:"tool_name"`
 	ToolInput             json.RawMessage   `json:"tool_input"`
+	ToolUseID             string            `json:"tool_use_id"`
 	PermissionSuggestions []json.RawMessage `json:"permission_suggestions"`
 }
 
@@ -205,6 +237,7 @@ func (b *Broker) serveHook(w http.ResponseWriter, r *http.Request) {
 		Cwd:       input.Cwd,
 		ToolName:  input.ToolName,
 		ToolInput: input.ToolInput,
+		ToolUseID: input.ToolUseID,
 		Always:    allowRules(input.PermissionSuggestions),
 	}
 	start := time.Now()
@@ -224,7 +257,8 @@ func (b *Broker) serveHook(w http.ResponseWriter, r *http.Request) {
 		decision.UpdatedPermissions = request.Always
 	case Allowed:
 	default:
-		// No decision: Claude Code falls back to its own prompt.
+		// Answered in the terminal, or shutting down: an empty answer
+		// leaves the decision to the terminal dialog.
 		w.WriteHeader(http.StatusOK)
 		return
 	}

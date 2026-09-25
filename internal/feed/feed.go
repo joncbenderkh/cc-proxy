@@ -121,13 +121,6 @@ func (h *Hub) SetState(name string, value any) error {
 	return nil
 }
 
-// Viewers reports how many clients are subscribed to the event stream.
-func (h *Hub) Viewers() int {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return len(h.subscribers)
-}
-
 func (h *Hub) broadcast(ev event) {
 	for ch := range h.subscribers {
 		select {
@@ -191,7 +184,7 @@ func (h *Hub) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; worker-src 'self'")
 		w.Write(indexHTML)
 	})
 	mux.HandleFunc("GET /events", h.serveEvents)
