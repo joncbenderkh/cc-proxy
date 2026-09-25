@@ -70,6 +70,9 @@ func TestSessionOf(t *testing.T) {
 		{"only tagged text", `{"messages":[{"role":"user","content":"<command-name>/compact</command-name>"}]}`, Session{}, false},
 		{"long title", `{"messages":[{"role":"user","content":"` + strings.Repeat("x", MaxTitle+10) + `"}]}`,
 			Session{Title: strings.Repeat("x", MaxTitle) + "…"}, false},
+		{"account email",
+			`{"messages":[{"role":"user","content":[{"type":"text","text":"<system-reminder>\n# userEmail\nThe user's email address is u@example.com. Use it only to identify the user.\n</system-reminder>"},{"type":"text","text":"hi"}]}]}`,
+			Session{Title: "hi", User: "u@example.com"}, false},
 		{"not json", `nope`, Session{}, true},
 	}
 	for _, tt := range tests {

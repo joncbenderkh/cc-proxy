@@ -66,6 +66,8 @@ internal/auth/           UI login token, cookie login, request guard
 internal/approval/       remote answers to PermissionRequest hooks
 internal/prompt/         remote prompts for idle sessions (Stop hooks)
 internal/push/           Web Push: VAPID key, subscriptions, encryption
+internal/gitrepo/        remote URL and branch of a working directory
+internal/sessionlog/     backfills session info from Claude Code's own logs
 hook.go                  `cc-proxy hook stop`, the Stop hook command
 notify.go                which approvals and idle sessions become pushes
 .github/workflows/       ci.yml (checks), release.yml (tag -> GitHub Release)
@@ -105,10 +107,17 @@ last 500 turns, which `--history-file` (default
 `<user cache dir>/cc-proxy/turns.jsonl`, 0600; `""` turns it off) keeps
 across restarts: turns are appended as JSON lines and the file is
 rewritten to the newest 500 once it holds 1000, and turn numbers continue
-where the last run stopped. The page opens on a list of sessions (project from the
-system prompt's working directory, title from the first prompt, status,
+where the last run stopped. The page opens on a list of sessions (labelled
+`<remote url>:<branch>`, read from the `.git` of the system prompt's working
+directory, else its basename; title from the first prompt, Claude account email, status,
 activity and cost), sorted with those needing an answer first; a session
-opens at `#s=<session_id>`. Both require the token in `--ui-token-file` (default
+opens at `#s=<session_id>`. The first request of a session also triggers a
+one-time, best-effort read of Claude Code's own local transcript
+(`~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`, via
+`internal/sessionlog`) so the card's cwd, branch, title and account email
+appear immediately, without waiting for that request's response; this
+never counts toward the session's turns or appears in its timeline. Both
+require the token in `--ui-token-file` (default
 `<user config dir>/cc-proxy/ui-token`, created 0600 on first run; delete it
 to rotate): open `/login?token=…` or paste it into the login form once to
 get a 400-day HttpOnly cookie, or send `Authorization: Bearer …`. The token

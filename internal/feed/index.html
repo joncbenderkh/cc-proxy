@@ -214,8 +214,13 @@ function selectedSession() {
 }
 
 function project(session) {
-  if (session.cwd) return session.cwd.replace(/\/+$/, "").split("/").pop() || session.cwd;
+  if (session.branch) return (session.remote || basename(session.cwd)) + ":" + session.branch;
+  if (session.cwd) return basename(session.cwd);
   return "Session " + session.id.slice(0, 8);
+}
+
+function basename(path) {
+  return path.replace(/\/+$/, "").split("/").pop() || path;
 }
 
 function ago(time) {
@@ -246,6 +251,7 @@ function renderSession(session) {
   if (session.turns) meta.append(el("span", "", session.turns + (session.turns === 1 ? " turn" : " turns")));
   if (session.cost) meta.append(el("span", "", usd(session.cost)));
   if (session.model) meta.append(el("span", "", shortModel(session.model)));
+  if (session.user) meta.append(el("span", "", session.user));
   meta.append(el("span", "", session.id.slice(0, 8)));
   card.append(meta);
   if (session.cwd) card.title = session.cwd;
@@ -316,13 +322,15 @@ function track(entry, isTurn) {
   if (!entry.session_id) return;
   let session = sessions.get(entry.session_id);
   if (!session) {
-    session = { id: entry.session_id, cwd: "", title: "", last: entry.time, turns: 0, cost: 0, model: "", stop: "" };
+    session = { id: entry.session_id, cwd: "", remote: "", branch: "", user: "", title: "", last: entry.time, turns: 0, cost: 0, model: "", stop: "" };
     sessions.set(entry.session_id, session);
   }
   if (new Date(entry.time) > new Date(session.last)) session.last = entry.time;
   if (!session.cwd && entry.cwd) session.cwd = entry.cwd;
-  if (!isTurn) return;
+  if (entry.user) session.user = entry.user;
+  if (entry.branch) { session.remote = entry.remote || ""; session.branch = entry.branch; }
   if (!session.title && entry.title && entry.cwd) session.title = entry.title;
+  if (!isTurn) return;
   session.turns++;
   const message = entry.message;
   if (message) {
@@ -468,8 +476,13 @@ events.addEventListener("idle", event => {
   showComposer();
 });
 events.addEventListener("turn", event => {
-  const follow = nearBottom();
   const turn = JSON.parse(event.data);
+  if (turn.backfill) {
+    track(turn, false);
+    if (!selectedSession()) showSessions();
+    return;
+  }
+  const follow = nearBottom();
   turns.push(turn);
   track(turn, true);
   redraw();

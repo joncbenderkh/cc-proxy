@@ -120,13 +120,20 @@ type Session struct {
 	Cwd string
 	// Title is the first line of the first prompt the user typed.
 	Title string
+	// User is the Claude account email Claude Code adds to the first
+	// message as context.
+	User string
 }
 
-const cwdMarker = "Primary working directory: "
+const (
+	cwdMarker  = "Primary working directory: "
+	userMarker = "The user's email address is "
+)
 
-// SessionOf reads the working directory from a request's system prompt and
-// a title from its first user message. Text blocks that open with a tag,
-// such as <system-reminder> or <command-name>, are skipped for the title.
+// SessionOf reads the working directory from a request's system prompt,
+// and a title and the account email from its first user message. Text
+// blocks that open with a tag, such as <system-reminder> or
+// <command-name>, are skipped for the title.
 func SessionOf(request []byte) (Session, error) {
 	var body struct {
 		System   json.RawMessage `json:"system"`
@@ -144,16 +151,45 @@ func SessionOf(request []byte) (Session, error) {
 		session.Cwd = strings.TrimSpace(line)
 	}
 	if len(body.Messages) > 0 && body.Messages[0].Role == "user" {
+		session.Title = TitleOf(body.Messages[0].Content)
 		for _, raw := range contentBlocks(body.Messages[0].Content) {
-			text := strings.TrimSpace(raw.Text)
-			if raw.Type == "text" && text != "" && !strings.HasPrefix(text, "<") {
-				line, _, _ := strings.Cut(text, "\n")
-				session.Title = truncateTo(strings.TrimSpace(line), MaxTitle)
+			if raw.Type != "text" {
+				continue
+			}
+			if email := EmailFromSentence(strings.TrimSpace(raw.Text)); email != "" {
+				session.User = email
 				break
 			}
 		}
 	}
 	return session, nil
+}
+
+// TitleOf returns a title from a user message's content: the first line
+// of its first text block that isn't a harness tag, such as
+// <system-reminder> or <command-name>.
+func TitleOf(content json.RawMessage) string {
+	for _, raw := range contentBlocks(content) {
+		text := strings.TrimSpace(raw.Text)
+		if raw.Type == "text" && text != "" && !strings.HasPrefix(text, "<") {
+			line, _, _ := strings.Cut(text, "\n")
+			return truncateTo(strings.TrimSpace(line), MaxTitle)
+		}
+	}
+	return ""
+}
+
+// EmailFromSentence extracts the address from the sentence Claude Code
+// writes about the account, "The user's email address is x@y. Use it
+// only to...", found anywhere in text. It returns "" when text doesn't
+// contain that sentence.
+func EmailFromSentence(text string) string {
+	_, after, found := strings.Cut(text, userMarker)
+	if !found {
+		return ""
+	}
+	email, _, _ := strings.Cut(after, " ")
+	return truncateTo(strings.TrimRight(strings.TrimSpace(email), "."), MaxTitle)
 }
 
 // ReplyJSON returns the text and tool_use blocks of a non-streaming
