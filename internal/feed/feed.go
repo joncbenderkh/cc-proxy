@@ -63,26 +63,45 @@ func NewHub(capacity int) *Hub {
 	return &Hub{capacity: capacity, nextSeq: 1, states: map[string][]byte{}, subscribers: map[chan event]struct{}{}}
 }
 
+// Restore remembers turns saved by an earlier run, oldest first, and
+// numbers later turns after them. Call it before the first Publish.
+func (h *Hub) Restore(turns []Turn) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, turn := range turns {
+		if data, err := json.Marshal(turn); err == nil {
+			h.remember(event{id: turn.Seq, name: "turn", data: data})
+		}
+		h.nextSeq = max(h.nextSeq, turn.Seq+1)
+	}
+}
+
 // Publish numbers turn, stores it and delivers it to every subscriber
-// without blocking.
-func (h *Hub) Publish(turn Turn) {
+// without blocking. It returns the numbered turn, or false once the hub
+// is closed.
+func (h *Hub) Publish(turn Turn) (Turn, bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.closed {
-		return
+		return turn, false
 	}
 	turn.Seq = h.nextSeq
 	h.nextSeq++
 	data, err := json.Marshal(turn)
 	if err != nil {
-		return
+		return turn, false
 	}
 	ev := event{id: turn.Seq, name: "turn", data: data}
+	h.remember(ev)
+	h.broadcast(ev)
+	return turn, true
+}
+
+func (h *Hub) remember(ev event) {
 	h.history = append(h.history, ev)
 	if len(h.history) > h.capacity {
 		h.history = h.history[len(h.history)-h.capacity:]
 	}
-	h.broadcast(ev)
 }
 
 // SetState replaces the value of the named state, sends it to every

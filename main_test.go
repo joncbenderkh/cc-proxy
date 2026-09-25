@@ -4,6 +4,8 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -19,6 +21,10 @@ func execute(args ...string) (string, error) {
 }
 
 func TestRejectsInvalidArguments(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "ui-token")
+	if err := os.WriteFile(tokenFile, []byte("abcdefghijklmnopqrstuvwxyz234567\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	tests := []struct {
 		name    string
 		args    []string
@@ -41,6 +47,8 @@ func TestRejectsInvalidArguments(t *testing.T) {
 		{"ui-listen all interfaces", []string{"--ui-listen", ":8788"}, "must be a loopback address"},
 		{"ui-listen without port", []string{"--ui-listen", "localhost"}, "invalid --ui-listen"},
 		{"ui-token-file without ui-listen", []string{"--ui-token-file", "token"}, "--ui-token-file requires --ui-listen"},
+		{"history-file without ui-listen", []string{"--history-file", "turns.jsonl"}, "--history-file requires --ui-listen"},
+		{"history-file unusable", []string{"--ui-listen", "127.0.0.1:0", "--ui-token-file", tokenFile, "--history-file", "/dev/null/turns.jsonl"}, "invalid --history-file"},
 		{"ui-token-file unusable", []string{"--ui-listen", "127.0.0.1:0", "--ui-token-file", "/dev/null/ui-token"}, "invalid --ui-token-file"},
 	}
 	for _, tt := range tests {
@@ -68,7 +76,7 @@ func TestHelpUsesDoubleDashFlags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, flag := range []string{"--listen", "--upstream", "--log-requests", "--log-responses", "--pretty", "--ui-listen", "--ui-token-file", "--version", "--help"} {
+	for _, flag := range []string{"--listen", "--upstream", "--log-requests", "--log-responses", "--pretty", "--ui-listen", "--ui-token-file", "--history-file", "--version", "--help"} {
 		if !strings.Contains(out, flag) {
 			t.Errorf("help missing %s:\n%s", flag, out)
 		}

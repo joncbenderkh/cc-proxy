@@ -61,6 +61,7 @@ internal/sse/            server-sent event stream parsing
 internal/usage/          model / token / cost extraction and the price table
 internal/transcript/     prompt / reply text and tool calls of a turn
 internal/feed/           in-memory turn hub, SSE /events, embedded web page
+internal/history/        feed turns kept in a JSON Lines file across restarts
 internal/auth/           UI login token, cookie login, request guard
 internal/approval/       remote answers to PermissionRequest hooks
 internal/prompt/         remote prompts for idle sessions (Stop hooks)
@@ -98,7 +99,11 @@ for models without a known price. Records also carry `session_id` from the
 
 `--ui-listen` serves a mobile web page (`/`) and an SSE stream of turns
 (`/events`, resumable via `Last-Event-ID`) from an in-memory ring of the
-last 500 turns. The page opens on a list of sessions (project from the
+last 500 turns, which `--history-file` (default
+`<user cache dir>/cc-proxy/turns.jsonl`, 0600; `""` turns it off) keeps
+across restarts: turns are appended as JSON lines and the file is
+rewritten to the newest 500 once it holds 1000, and turn numbers continue
+where the last run stopped. The page opens on a list of sessions (project from the
 system prompt's working directory, title from the first prompt, status,
 activity and cost), sorted with those needing an answer first; a session
 opens at `#s=<session_id>`. Both require the token in `--ui-token-file` (default
