@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // Package sessionlog reads Claude Code's own local transcript of a
-// session (~/.claude/projects/<encoded-cwd>/<session-id>.jsonl) so a
-// session's working directory, branch, title and account email can be
-// known before any request for it has passed through the proxy. This is
-// a read-only, best-effort supplement to the traffic the proxy relays;
-// its file format is Claude Code's own and undocumented, so a lookup
-// that fails or finds nothing is not an error.
+// session (<config dir>/projects/<encoded-cwd>/<session-id>.jsonl,
+// normally under ~/.claude) so a session's working directory, branch,
+// title and account email can be known before any request for it has
+// passed through the proxy. This is a read-only, best-effort supplement
+// to the traffic the proxy relays; its file format is Claude Code's own
+// and undocumented, so a lookup that fails or finds nothing is not an
+// error.
 package sessionlog
 
 import (
@@ -32,31 +33,43 @@ type Session struct {
 // so a very long-running session doesn't make a lookup slow.
 const maxScan = 2000
 
-// Dir is the directory Claude Code writes session transcripts under. A
+// Dirs are the "projects" directories, one per Claude Code config
+// directory, searched in order for a session's transcript. It defaults to
+// just ~/.claude/projects; running more than one Claude Code identity
+// (each launched with its own CLAUDE_CONFIG_DIR, such as
+// CLAUDE_CONFIG_DIR=~/.claude-work) means adding their directories too. A
 // package variable so tests can point it elsewhere.
-var Dir = defaultDir()
+var Dirs = defaultDirs()
 
-func defaultDir() string {
+func defaultDirs() []string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return ""
+		return nil
 	}
-	return filepath.Join(home, ".claude", "projects")
+	return []string{filepath.Join(home, ".claude", "projects")}
 }
 
-// Find looks up the local transcript of sessionID and reads as much of
-// Session as it can find in its first lines. It reports false when no
-// transcript is found or none of these fields appear in it.
+// Find looks up the local transcript of sessionID across Dirs and reads
+// as much of Session as it can find in its first lines. It reports false
+// when no transcript is found or none of these fields appear in it.
+// Session ids are unique per launch, so the first directory with a
+// matching transcript is authoritative; the rest are not searched.
 func Find(sessionID string) (Session, bool) {
-	if Dir == "" || sessionID == "" {
+	if sessionID == "" {
 		return Session{}, false
 	}
-	matches, err := filepath.Glob(filepath.Join(Dir, "*", sessionID+".jsonl"))
-	if err != nil || len(matches) == 0 {
-		return Session{}, false
+	for _, dir := range Dirs {
+		if dir == "" {
+			continue
+		}
+		matches, err := filepath.Glob(filepath.Join(dir, "*", sessionID+".jsonl"))
+		if err != nil || len(matches) == 0 {
+			continue
+		}
+		session := read(matches[0])
+		return session, session != Session{}
 	}
-	session := read(matches[0])
-	return session, session != Session{}
+	return Session{}, false
 }
 
 // line is the subset of Claude Code's transcript line shapes this

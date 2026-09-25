@@ -399,9 +399,9 @@ func TestBackfillsSessionFromLocalTranscript(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(sessionDir, "session-1.jsonl"), []byte(transcriptBody), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	original := sessionlog.Dir
-	sessionlog.Dir = sessionsDir
-	defer func() { sessionlog.Dir = original }()
+	original := sessionlog.Dirs
+	sessionlog.Dirs = []string{sessionsDir}
+	defer func() { sessionlog.Dirs = original }()
 
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		io.Copy(io.Discard, r.Body)

@@ -50,6 +50,7 @@ func TestRejectsInvalidArguments(t *testing.T) {
 		{"history-file without ui-listen", []string{"--history-file", "turns.jsonl"}, "--history-file requires --ui-listen"},
 		{"history-file unusable", []string{"--ui-listen", "127.0.0.1:0", "--ui-token-file", tokenFile, "--history-file", "/dev/null/turns.jsonl"}, "invalid --history-file"},
 		{"ui-token-file unusable", []string{"--ui-listen", "127.0.0.1:0", "--ui-token-file", "/dev/null/ui-token"}, "invalid --ui-token-file"},
+		{"claude-config-dir without ui-listen", []string{"--claude-config-dir", "/tmp/x"}, "--claude-config-dir requires --ui-listen"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -76,7 +77,7 @@ func TestHelpUsesDoubleDashFlags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, flag := range []string{"--listen", "--upstream", "--log-requests", "--log-responses", "--pretty", "--ui-listen", "--ui-token-file", "--history-file", "--version", "--help"} {
+	for _, flag := range []string{"--listen", "--upstream", "--log-requests", "--log-responses", "--pretty", "--ui-listen", "--ui-token-file", "--history-file", "--claude-config-dir", "--version", "--help"} {
 		if !strings.Contains(out, flag) {
 			t.Errorf("help missing %s:\n%s", flag, out)
 		}

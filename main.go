@@ -39,6 +39,7 @@ import (
 	"github.com/joncbenderkh/cc-proxy/internal/prompt"
 	"github.com/joncbenderkh/cc-proxy/internal/proxy"
 	"github.com/joncbenderkh/cc-proxy/internal/push"
+	"github.com/joncbenderkh/cc-proxy/internal/sessionlog"
 	"github.com/joncbenderkh/cc-proxy/internal/transcript"
 )
 
@@ -62,6 +63,7 @@ func main() {
 
 func newRootCommand() *cobra.Command {
 	var listen, uiListen, uiTokenFile, historyFile, upstreamURL string
+	var claudeConfigDirs []string
 	var logRequests, logResponses, pretty bool
 	cmd := &cobra.Command{
 		Use:     "cc-proxy",
@@ -80,6 +82,8 @@ func newRootCommand() *cobra.Command {
 				return errors.New("--ui-token-file requires --ui-listen")
 			} else if cmd.Flags().Changed("history-file") {
 				return errors.New("--history-file requires --ui-listen")
+			} else if cmd.Flags().Changed("claude-config-dir") {
+				return errors.New("--claude-config-dir requires --ui-listen")
 			}
 			upstream, err := parseUpstream(upstreamURL)
 			if err != nil {
@@ -94,6 +98,7 @@ func newRootCommand() *cobra.Command {
 				if token, err = loadUIToken(uiTokenFile, logger); err != nil {
 					return err
 				}
+				addClaudeConfigDirs(claudeConfigDirs)
 				if historyFile != "" || !cmd.Flags().Changed("history-file") {
 					if turns, err = openHistory(historyFile, logger); err != nil {
 						return err
@@ -113,6 +118,7 @@ func newRootCommand() *cobra.Command {
 	cmd.Flags().StringVar(&uiListen, "ui-listen", "", "serve the live feed web page on this loopback address (host:port); off when empty")
 	cmd.Flags().StringVar(&uiTokenFile, "ui-token-file", "", "file holding the web page login token, created if missing (default <user config dir>/cc-proxy/ui-token)")
 	cmd.Flags().StringVar(&historyFile, "history-file", "", `file keeping the feed's newest turns across restarts (default <user cache dir>/cc-proxy/turns.jsonl; "" turns it off)`)
+	cmd.Flags().StringArrayVar(&claudeConfigDirs, "claude-config-dir", nil, "additional Claude Code config directory to read session transcripts from, e.g. one set via CLAUDE_CONFIG_DIR for a second identity (~/.claude is always included); repeatable")
 	cmd.Flags().StringVar(&upstreamURL, "upstream", "https://api.anthropic.com", "Anthropic API base URL (http or https)")
 	cmd.Flags().BoolVar(&logRequests, "log-requests", false, "log the headers and body of every request sent upstream (credentials redacted)")
 	cmd.Flags().BoolVar(&logResponses, "log-responses", false, "log the headers and body of every response relayed to the client")
@@ -264,6 +270,16 @@ func openPush(logger *slog.Logger) (*push.Service, error) {
 		return nil, fmt.Errorf("push notifications: %w", err)
 	}
 	return service, nil
+}
+
+// addClaudeConfigDirs extends where sessionlog looks for Claude Code's own
+// session transcripts, for users who run more than one Claude Code
+// identity (for example CLAUDE_CONFIG_DIR=~/.claude-work for a work
+// account) through the same proxy. ~/.claude is always searched too.
+func addClaudeConfigDirs(dirs []string) {
+	for _, dir := range dirs {
+		sessionlog.Dirs = append(sessionlog.Dirs, filepath.Join(dir, "projects"))
+	}
 }
 
 func serve(ctx context.Context, listen, uiListen, uiToken string, turns *history.Log, notifications *push.Service, upstream *url.URL, logger *slog.Logger, version string, opts proxy.Options) error {

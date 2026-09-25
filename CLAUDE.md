@@ -92,6 +92,7 @@ go run . --log-requests                                    # also log outbound h
 go run . --log-responses                                   # also log response headers + bodies
 go run . --pretty                                          # indented JSON log records
 go run . --ui-listen 127.0.0.1:8788                        # live feed web page
+go run . --ui-listen 127.0.0.1:8788 --claude-config-dir ~/.claude-work  # also read a second identity's sessions
 go run . hook stop --ui-url http://127.0.0.1:8788          # Stop hook (reads hook input on stdin)
 ```
 
@@ -113,10 +114,14 @@ directory, else its basename; title from the first prompt, Claude account email,
 activity and cost), sorted with those needing an answer first; a session
 opens at `#s=<session_id>`. The first request of a session also triggers a
 one-time, best-effort read of Claude Code's own local transcript
-(`~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`, via
+(`<config dir>/projects/<encoded-cwd>/<session-id>.jsonl`, via
 `internal/sessionlog`) so the card's cwd, branch, title and account email
 appear immediately, without waiting for that request's response; this
-never counts toward the session's turns or appears in its timeline. Both
+never counts toward the session's turns or appears in its timeline.
+`~/.claude` is always searched; running more than one Claude Code identity
+concurrently (each launched with its own `CLAUDE_CONFIG_DIR`, such as
+`CLAUDE_CONFIG_DIR=~/.claude-work`) means adding its directory too with a
+repeated `--claude-config-dir`. Both
 require the token in `--ui-token-file` (default
 `<user config dir>/cc-proxy/ui-token`, created 0600 on first run; delete it
 to rotate): open `/login?token=…` or paste it into the login form once to
