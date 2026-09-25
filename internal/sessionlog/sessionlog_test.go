@@ -22,8 +22,8 @@ func writeSession(t *testing.T, dir, project, sessionID, content string) {
 
 func TestFind(t *testing.T) {
 	dir := t.TempDir()
-	Dir = dir
-	t.Cleanup(func() { Dir = defaultDir() })
+	Dirs = []string{dir}
+	t.Cleanup(func() { Dirs = defaultDirs() })
 
 	writeSession(t, dir, "-home-u-proj", "s1", `
 {"type":"user","message":{"role":"user","content":"<local-command-caveat>ignored</local-command-caveat>"},"isMeta":true,"cwd":"/home/u/proj","gitBranch":"main"}
@@ -54,10 +54,26 @@ func TestFind(t *testing.T) {
 	}
 }
 
-func TestFindNoDir(t *testing.T) {
-	Dir = filepath.Join(t.TempDir(), "missing")
-	t.Cleanup(func() { Dir = defaultDir() })
+func TestFindNoDirs(t *testing.T) {
+	Dirs = []string{filepath.Join(t.TempDir(), "missing")}
+	t.Cleanup(func() { Dirs = defaultDirs() })
 	if _, ok := Find("s1"); ok {
 		t.Error("Find() = true for a nonexistent projects directory, want false")
+	}
+}
+
+func TestFindAcrossMultipleDirs(t *testing.T) {
+	first, second := t.TempDir(), t.TempDir()
+	Dirs = []string{first, second}
+	t.Cleanup(func() { Dirs = defaultDirs() })
+
+	writeSession(t, second, "-home-u-proj", "s1", `
+{"type":"user","message":{"role":"user","content":"fix the build"},"cwd":"/home/u/proj","gitBranch":"main"}
+`)
+
+	got, ok := Find("s1")
+	want := Session{Cwd: "/home/u/proj", Branch: "main", Title: "fix the build"}
+	if !ok || got != want {
+		t.Errorf("Find(%q) = %+v, %v; want %+v, true", "s1", got, ok, want)
 	}
 }
