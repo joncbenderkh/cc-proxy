@@ -218,9 +218,15 @@ function selectedSession() {
 }
 
 function project(session) {
-  if (session.branch) return (session.remote || basename(session.cwd)) + ":" + session.branch;
+  if (session.branch) return (repoName(session.remote) || basename(session.cwd)) + ":" + session.branch;
   if (session.cwd) return basename(session.cwd);
   return "Session " + session.id.slice(0, 8);
+}
+
+// repoName turns a remote URL such as git@github.com:u/repo.git or
+// https://github.com/u/repo into "repo".
+function repoName(remote) {
+  return (remote || "").replace(/\/+$/, "").replace(/\.git$/, "").split(/[/:]/).pop();
 }
 
 function basename(path) {

@@ -108,8 +108,8 @@ last 500 turns, which `--history-file` (default
 across restarts: turns are appended as JSON lines and the file is
 rewritten to the newest 500 once it holds 1000, and turn numbers continue
 where the last run stopped. The page opens on a list of sessions (labelled
-`<remote url>:<branch>`, read from the `.git` of the system prompt's working
-directory, else its basename; title from the first prompt, Claude account email, status,
+`<repo>:<branch>`, the repo name taken from the remote URL in the `.git`
+of the system prompt's working directory, else its basename; title from the first prompt, Claude account email, status,
 activity and cost), sorted with those needing an answer first; a session
 opens at `#s=<session_id>`. The first request of a session also triggers a
 one-time, best-effort read of Claude Code's own local transcript
