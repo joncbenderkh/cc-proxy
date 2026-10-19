@@ -35,6 +35,7 @@ header {
 h1 { font-size: 16px; margin: 0; }
 #dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bad); }
 #dot.live { background: var(--ok); }
+#connection { color: var(--muted); font-size: 13px; }
 #back { color: var(--accent); text-decoration: none; font-size: 22px; line-height: 1; padding: 0 4px; }
 #heading { flex: 1 1 0; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #total { color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -107,10 +108,11 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 </head>
 <body>
 <header>
-  <span id="dot" title="feed connecting"></span>
   <a id="back" href="#" aria-label="All sessions" hidden>‹</a>
   <h1 id="heading">cc-proxy</h1>
   <span id="total"></span>
+  <span id="dot"></span>
+  <span id="connection">connecting</span>
   <button id="notify" type="button" hidden>Notify me</button>
 </header>
 <main>
@@ -140,7 +142,7 @@ let pending = [];
 const total = document.getElementById("total");
 const dot = document.getElementById("dot");
 const overview = document.getElementById("overview");
-let connection = "connecting";
+const connection = document.getElementById("connection");
 const FOLD = 600;
 const approvals = document.getElementById("approvals");
 const seenApprovals = new Set();
@@ -277,7 +279,7 @@ function showSessions() {
   total.textContent = all.length ? usd(cost) + " total" : "";
   overview.hidden = all.length === 0;
   overview.textContent = (all.length === 1 ? "1 session" : all.length + " sessions") +
-    " · those waiting on you first, then by last activity · feed " + connection;
+    " · those waiting on you first, then by last activity";
   document.getElementById("empty").hidden = all.length > 0;
 }
 
@@ -476,13 +478,11 @@ promptBox.addEventListener("keydown", event => {
 const nearBottom = () => window.innerHeight + window.scrollY >= document.body.scrollHeight - 80;
 const events = new EventSource("events");
 function setConnection(state) {
-  connection = state;
-  dot.className = state;
-  dot.title = "feed " + state;
-  if (!selectedSession()) showSessions();
+  dot.className = state === "live" ? "live" : "";
+  connection.textContent = state;
 }
 events.onopen = () => setConnection("live");
-events.onerror = () => setConnection("reconnecting");
+events.onerror = () => setConnection(events.readyState === EventSource.CLOSED ? "offline" : "reconnecting");
 events.addEventListener("approvals", event => {
   pending = JSON.parse(event.data);
   pending.forEach(request => track(request, false));
