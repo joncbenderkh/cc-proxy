@@ -78,6 +78,7 @@ main { max-width: 760px; margin: 0 auto; padding: 12px 16px 48px; }
 .result.error { border-left: 3px solid var(--bad); }
 details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 #empty { color: var(--muted); text-align: center; margin-top: 40px; }
+#overview { margin: 0 0 10px; }
 #dock { position: sticky; bottom: 0; padding-bottom: env(safe-area-inset-bottom); }
 .approval {
   background: var(--surface); border: 2px solid var(--accent); border-radius: 10px;
@@ -106,7 +107,7 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 </head>
 <body>
 <header>
-  <span id="dot" title="disconnected"></span>
+  <span id="dot" title="feed connecting"></span>
   <a id="back" href="#" aria-label="All sessions" hidden>‹</a>
   <h1 id="heading">cc-proxy</h1>
   <span id="total"></span>
@@ -114,6 +115,7 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 </header>
 <main>
   <p id="empty">Waiting for Claude Code traffic…</p>
+  <p id="overview" class="meta" hidden></p>
   <nav id="sessions" aria-label="Sessions"></nav>
   <div id="turns"></div>
   <div id="dock">
@@ -137,6 +139,8 @@ const back = document.getElementById("back");
 let pending = [];
 const total = document.getElementById("total");
 const dot = document.getElementById("dot");
+const overview = document.getElementById("overview");
+let connection = "connecting";
 const FOLD = 600;
 const approvals = document.getElementById("approvals");
 const seenApprovals = new Set();
@@ -183,13 +187,13 @@ function render(turn) {
     const u = message.usage;
     meta.append(
       el("span", "", shortModel(message.model)),
-      el("span", "", (u.input_tokens + u.cache_creation_input_tokens + u.cache_read_input_tokens).toLocaleString() + " in · " + u.output_tokens.toLocaleString() + " out"),
+      el("span", "", (u.input_tokens + u.cache_creation_input_tokens + u.cache_read_input_tokens).toLocaleString() + " tokens in · " + u.output_tokens.toLocaleString() + " out"),
     );
     if (message.cost_usd !== undefined) meta.append(el("span", "", usd(message.cost_usd)));
-    if (message.stop_reason) meta.append(el("span", "", message.stop_reason));
+    if (message.stop_reason) meta.append(el("span", "", "stop: " + message.stop_reason));
   }
   if (turn.status !== 200) meta.append(el("span", "err", "HTTP " + turn.status));
-  meta.append(el("span", "", (turn.duration_ms / 1000).toFixed(1) + " s"));
+  meta.append(el("span", "", "took " + (turn.duration_ms / 1000).toFixed(1) + " s"));
   card.append(meta);
 
   for (const block of turn.prompt || []) {
@@ -247,12 +251,12 @@ function renderSession(session) {
   top.append(el("span", "project", project(session)), el("span", "badge " + state.kind, state.label));
   card.append(top, el("div", "title" + (session.title ? "" : " none"), session.title || "No prompt yet"));
   const meta = el("div", "meta");
-  meta.append(el("span", "", ago(session.last)));
+  meta.append(el("span", "", "active " + ago(session.last)));
   if (session.turns) meta.append(el("span", "", session.turns + (session.turns === 1 ? " turn" : " turns")));
-  if (session.cost) meta.append(el("span", "", usd(session.cost)));
-  if (session.model) meta.append(el("span", "", shortModel(session.model)));
-  if (session.user) meta.append(el("span", "", session.user));
-  meta.append(el("span", "", session.id.slice(0, 8)));
+  if (session.cost) meta.append(el("span", "", usd(session.cost) + " spent"));
+  if (session.model) meta.append(el("span", "", "model " + shortModel(session.model)));
+  if (session.user) meta.append(el("span", "", "account " + session.user));
+  meta.append(el("span", "", "session " + session.id.slice(0, 8)));
   card.append(meta);
   if (session.cwd) card.title = session.cwd;
   return card;
@@ -264,7 +268,10 @@ function showSessions() {
   all.sort((a, b) => urgent(b) - urgent(a) || new Date(b.last) - new Date(a.last));
   sessionList.replaceChildren(...all.map(renderSession));
   const cost = all.reduce((sum, session) => sum + session.cost, 0);
-  total.textContent = all.length ? usd(cost) : "";
+  total.textContent = all.length ? usd(cost) + " total" : "";
+  overview.hidden = all.length === 0;
+  overview.textContent = (all.length === 1 ? "1 session" : all.length + " sessions") +
+    " · those waiting on you first, then by last activity · feed " + connection;
   document.getElementById("empty").hidden = all.length > 0;
 }
 
@@ -273,6 +280,7 @@ function redraw() {
   const session = sessions.get(id);
   back.hidden = !id;
   sessionList.hidden = !!id;
+  overview.hidden = !!id;
   list.hidden = !id;
   if (!id) {
     heading.textContent = "cc-proxy";
@@ -282,7 +290,7 @@ function redraw() {
     heading.textContent = session ? project(session) + (session.title ? " · " + session.title : "") : "Session " + id.slice(0, 8);
     const shown = turns.filter(turn => turn.session_id === id);
     list.replaceChildren(...shown.map(render));
-    total.textContent = session && session.cost ? usd(session.cost) : "";
+    total.textContent = session && session.cost ? usd(session.cost) + " spent" : "";
     document.getElementById("empty").hidden = shown.length > 0;
   }
   showComposer();
@@ -461,8 +469,14 @@ promptBox.addEventListener("keydown", event => {
 
 const nearBottom = () => window.innerHeight + window.scrollY >= document.body.scrollHeight - 80;
 const events = new EventSource("events");
-events.onopen = () => { dot.className = "live"; dot.title = "live"; };
-events.onerror = () => { dot.className = ""; dot.title = "reconnecting"; };
+function setConnection(state) {
+  connection = state;
+  dot.className = state;
+  dot.title = "feed " + state;
+  if (!selectedSession()) showSessions();
+}
+events.onopen = () => setConnection("live");
+events.onerror = () => setConnection("reconnecting");
 events.addEventListener("approvals", event => {
   pending = JSON.parse(event.data);
   pending.forEach(request => track(request, false));
