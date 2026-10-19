@@ -80,6 +80,7 @@ main { max-width: 760px; margin: 0 auto; padding: 12px 16px 48px; }
 details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 #empty { color: var(--muted); text-align: center; margin-top: 40px; }
 #overview { margin: 0 0 10px; }
+#overview[hidden] { display: none; }
 #dock { position: sticky; bottom: 0; padding-bottom: env(safe-area-inset-bottom); }
 .approval {
   background: var(--surface); border: 2px solid var(--accent); border-radius: 10px;
@@ -183,15 +184,15 @@ function usd(value) {
 function render(turn) {
   const card = el("article", "turn");
   const meta = el("div", "meta");
-  meta.append(el("span", "", new Date(turn.time).toLocaleTimeString()));
+  meta.append(el("span", "", "at " + new Date(turn.time).toLocaleTimeString()));
   const message = turn.message;
   if (message) {
     const u = message.usage;
     meta.append(
-      el("span", "", shortModel(message.model)),
+      el("span", "", "model " + shortModel(message.model)),
       el("span", "", (u.input_tokens + u.cache_creation_input_tokens + u.cache_read_input_tokens).toLocaleString() + " tokens in · " + u.output_tokens.toLocaleString() + " out"),
     );
-    if (message.cost_usd !== undefined) meta.append(el("span", "", usd(message.cost_usd)));
+    if (message.cost_usd !== undefined) meta.append(el("span", "", usd(message.cost_usd) + " spent"));
     if (message.stop_reason) meta.append(el("span", "", "stop: " + message.stop_reason));
   }
   if (turn.status !== 200) meta.append(el("span", "err", "HTTP " + turn.status));
@@ -228,7 +229,8 @@ function project(session) {
 // repoName turns a remote URL such as git@github.com:u/repo.git or
 // https://github.com/u/repo into "repo".
 function repoName(remote) {
-  return (remote || "").replace(/\/+$/, "").replace(/\.git$/, "").split(/[/:]/).pop();
+  const name = (remote || "").replace(/\/+$/, "").replace(/\.git$/i, "").split(/[\\/:]/).pop();
+  return name === "." ? "" : name;
 }
 
 function basename(path) {
@@ -266,7 +268,7 @@ function renderSession(session) {
   if (session.user) meta.append(el("span", "", "account " + session.user));
   meta.append(el("span", "", "session " + session.id.slice(0, 8)));
   card.append(meta);
-  if (session.cwd) card.title = session.cwd;
+  card.title = [session.remote, session.cwd].filter(Boolean).join("\n");
   return card;
 }
 
