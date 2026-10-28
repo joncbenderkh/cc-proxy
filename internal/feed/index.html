@@ -83,6 +83,7 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 #overview { margin: 0 0 10px; align-items: center; }
 #notify { margin-left: auto; }
 #overview[hidden] { display: none; }
+.screen-reader-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 #dock { position: sticky; bottom: 0; padding-bottom: env(safe-area-inset-bottom); }
 .approval {
   background: var(--surface); border: 2px solid var(--accent); border-radius: 10px;
@@ -114,8 +115,8 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
   <a id="back" href="#" aria-label="All sessions" hidden>‹</a>
   <h1 id="heading">cc-proxy</h1>
   <span id="total"></span>
-  <span id="dot" role="img" title="connecting" aria-label="connecting"></span>
-  <span id="connection">connecting</span>
+  <span id="dot" title="connecting" aria-hidden="true"></span>
+  <span id="connection" role="status">connecting</span>
 </header>
 <main>
   <div id="overview" class="meta" hidden>
@@ -503,12 +504,12 @@ const nearBottom = () => window.innerHeight + window.scrollY >= document.body.sc
 function setConnection(state) {
   dot.className = state === "live" ? "live" : "";
   dot.title = state;
-  dot.setAttribute("aria-label", state);
-  connection.hidden = state === "live";
+  // Screen readers still hear "live" from the status text.
+  connection.className = state === "live" ? "screen-reader-only" : "";
   if (state !== "offline") {
     // Live is the normal state, so the green dot alone says it and the
     // session name keeps the room on a phone.
-    connection.textContent = state === "live" ? "" : state;
+    connection.textContent = state;
     return;
   }
   // A reload lands on the login form if the cookie is no longer valid.
