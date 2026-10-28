@@ -77,3 +77,67 @@ func TestFindAcrossMultipleDirs(t *testing.T) {
 		t.Errorf("Find(%q) = %+v, %v; want %+v, true", "s1", got, ok, want)
 	}
 }
+
+func TestFindFirstDirWins(t *testing.T) {
+	first, second := t.TempDir(), t.TempDir()
+	Dirs = []string{first, second}
+	t.Cleanup(func() { Dirs = defaultDirs() })
+
+	writeSession(t, first, "-home-u-a", "s1", `
+{"type":"user","message":{"role":"user","content":"first"}}
+`)
+	writeSession(t, second, "-home-u-b", "s1", `
+{"type":"user","message":{"role":"user","content":"second"}}
+`)
+
+	if got, _ := Find("s1"); got.Title != "first" {
+		t.Errorf("Find(%q).Title = %q, want %q", "s1", got.Title, "first")
+	}
+}
+
+func TestFindTakesDirLiterally(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), ".claude-[work]", "projects")
+	Dirs = []string{dir}
+	t.Cleanup(func() { Dirs = defaultDirs() })
+
+	writeSession(t, dir, "-home-u-proj", "s1", `
+{"type":"user","message":{"role":"user","content":"fix the build"}}
+`)
+
+	if _, ok := Find("s1"); !ok {
+		t.Errorf("Find(%q) = false for a directory name with glob characters, want true", "s1")
+	}
+}
+
+func TestFindRejectsPatternSessionIDs(t *testing.T) {
+	dir := t.TempDir()
+	Dirs = []string{dir}
+	t.Cleanup(func() { Dirs = defaultDirs() })
+
+	writeSession(t, dir, "-home-u-proj", "s1", `
+{"type":"user","message":{"role":"user","content":"secret"}}
+`)
+
+	for _, id := range []string{"*", "s?", "[s]1", "../-home-u-proj/s1"} {
+		if got, ok := Find(id); ok {
+			t.Errorf("Find(%q) = %+v, true; want false", id, got)
+		}
+	}
+}
+
+func TestFindFollowsSymlinkedProjects(t *testing.T) {
+	dir, target := t.TempDir(), t.TempDir()
+	Dirs = []string{dir}
+	t.Cleanup(func() { Dirs = defaultDirs() })
+
+	writeSession(t, target, "proj", "s1", `
+{"type":"user","message":{"role":"user","content":"fix the build"}}
+`)
+	if err := os.Symlink(filepath.Join(target, "proj"), filepath.Join(dir, "-home-u-proj")); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok := Find("s1"); !ok {
+		t.Errorf("Find(%q) = false for a symlinked project directory, want true", "s1")
+	}
+}

@@ -55,21 +55,48 @@ func defaultDirs() []string {
 // Session ids are unique per launch, so the first directory with a
 // matching transcript is authoritative; the rest are not searched.
 func Find(sessionID string) (Session, bool) {
-	if sessionID == "" {
+	if !validSessionID(sessionID) {
 		return Session{}, false
 	}
 	for _, dir := range Dirs {
-		if dir == "" {
+		path, ok := transcriptPath(dir, sessionID)
+		if !ok {
 			continue
 		}
-		matches, err := filepath.Glob(filepath.Join(dir, "*", sessionID+".jsonl"))
-		if err != nil || len(matches) == 0 {
-			continue
-		}
-		session := read(matches[0])
+		session := read(path)
 		return session, session != Session{}
 	}
 	return Session{}, false
+}
+
+// validSessionID accepts only the characters of Claude Code's session
+// ids (UUIDs). The id comes from a request header, so anything else
+// could name a path outside the transcript directories.
+func validSessionID(sessionID string) bool {
+	if sessionID == "" {
+		return false
+	}
+	for _, r := range sessionID {
+		if !('a' <= r && r <= 'z' || 'A' <= r && r <= 'Z' || '0' <= r && r <= '9' || r == '-') {
+			return false
+		}
+	}
+	return true
+}
+
+// transcriptPath finds sessionID's transcript in one of dir's project
+// subdirectories, taking dir literally rather than as a glob pattern.
+func transcriptPath(dir, sessionID string) (string, bool) {
+	// ReadDir returns the entries read before an error, so those are
+	// still searched.
+	projects, _ := os.ReadDir(dir)
+	for _, project := range projects {
+		path := filepath.Join(dir, project.Name(), sessionID+".jsonl")
+		if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() {
+			return path, true
+		}
+	}
+	return "", false
 }
 
 // line is the subset of Claude Code's transcript line shapes this
