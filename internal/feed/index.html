@@ -114,7 +114,7 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
   <a id="back" href="#" aria-label="All sessions" hidden>‹</a>
   <h1 id="heading">cc-proxy</h1>
   <span id="total"></span>
-  <span id="dot"></span>
+  <span id="dot" title="connecting"></span>
   <span id="connection">connecting</span>
 </header>
 <main>
@@ -487,8 +487,11 @@ promptBox.addEventListener("keydown", event => {
 const nearBottom = () => window.innerHeight + window.scrollY >= document.body.scrollHeight - 80;
 function setConnection(state) {
   dot.className = state === "live" ? "live" : "";
+  dot.title = state;
   if (state !== "offline") {
-    connection.textContent = state;
+    // Live is the normal state, so the green dot alone says it and the
+    // session name keeps the room on a phone.
+    connection.textContent = state === "live" ? "" : state;
     return;
   }
   // A reload lands on the login form if the cookie is no longer valid.
