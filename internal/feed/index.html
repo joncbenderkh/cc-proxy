@@ -114,7 +114,7 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
   <a id="back" href="#" aria-label="All sessions" hidden>‹</a>
   <h1 id="heading">cc-proxy</h1>
   <span id="total"></span>
-  <span id="dot" title="connecting"></span>
+  <span id="dot" role="img" title="connecting" aria-label="connecting"></span>
   <span id="connection">connecting</span>
 </header>
 <main>
@@ -499,6 +499,8 @@ const nearBottom = () => window.innerHeight + window.scrollY >= document.body.sc
 function setConnection(state) {
   dot.className = state === "live" ? "live" : "";
   dot.title = state;
+  dot.setAttribute("aria-label", state);
+  connection.hidden = state === "live";
   if (state !== "offline") {
     // Live is the normal state, so the green dot alone says it and the
     // session name keeps the room on a phone.
