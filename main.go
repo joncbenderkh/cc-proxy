@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
@@ -25,6 +26,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -39,6 +41,7 @@ import (
 	"github.com/joncbenderkh/cc-proxy/internal/prompt"
 	"github.com/joncbenderkh/cc-proxy/internal/proxy"
 	"github.com/joncbenderkh/cc-proxy/internal/push"
+	"github.com/joncbenderkh/cc-proxy/internal/sessionlog"
 	"github.com/joncbenderkh/cc-proxy/internal/transcript"
 )
 
@@ -62,6 +65,7 @@ func main() {
 
 func newRootCommand() *cobra.Command {
 	var listen, uiListen, uiTokenFile, historyFile, upstreamURL string
+	var claudeConfigDirs []string
 	var logRequests, logResponses, pretty bool
 	cmd := &cobra.Command{
 		Use:     "cc-proxy",
@@ -80,8 +84,14 @@ func newRootCommand() *cobra.Command {
 				return errors.New("--ui-token-file requires --ui-listen")
 			} else if cmd.Flags().Changed("history-file") {
 				return errors.New("--history-file requires --ui-listen")
+			} else if cmd.Flags().Changed("claude-config-dir") {
+				return errors.New("--claude-config-dir requires --ui-listen")
 			}
 			upstream, err := parseUpstream(upstreamURL)
+			if err != nil {
+				return err
+			}
+			configDirs, err := parseClaudeConfigDirs(claudeConfigDirs)
 			if err != nil {
 				return err
 			}
@@ -104,7 +114,7 @@ func newRootCommand() *cobra.Command {
 					return err
 				}
 			}
-			return serve(cmd.Context(), listen, uiListen, token, turns, notifications, upstream, logger, cmd.Version, proxy.Options{LogRequests: logRequests, LogResponses: logResponses})
+			return serve(cmd.Context(), listen, uiListen, token, turns, notifications, upstream, logger, cmd.Version, proxy.Options{LogRequests: logRequests, LogResponses: logResponses, SessionDirs: sessionDirs(configDirs)})
 		},
 	}
 	cmd.SetVersionTemplate("cc-proxy {{.Version}}\n")
@@ -113,6 +123,7 @@ func newRootCommand() *cobra.Command {
 	cmd.Flags().StringVar(&uiListen, "ui-listen", "", "serve the live feed web page on this loopback address (host:port); off when empty")
 	cmd.Flags().StringVar(&uiTokenFile, "ui-token-file", "", "file holding the web page login token, created if missing (default <user config dir>/cc-proxy/ui-token)")
 	cmd.Flags().StringVar(&historyFile, "history-file", "", `file keeping the feed's newest turns across restarts (default <user cache dir>/cc-proxy/turns.jsonl; "" turns it off)`)
+	cmd.Flags().StringArrayVar(&claudeConfigDirs, "claude-config-dir", nil, "additional Claude Code config directory to read session transcripts from, e.g. one set via CLAUDE_CONFIG_DIR for a second identity (~/.claude is always included); repeatable")
 	cmd.Flags().StringVar(&upstreamURL, "upstream", "https://api.anthropic.com", "Anthropic API base URL (http or https)")
 	cmd.Flags().BoolVar(&logRequests, "log-requests", false, "log the headers and body of every request sent upstream (credentials redacted)")
 	cmd.Flags().BoolVar(&logResponses, "log-responses", false, "log the headers and body of every response relayed to the client")
@@ -264,6 +275,80 @@ func openPush(logger *slog.Logger) (*push.Service, error) {
 		return nil, fmt.Errorf("push notifications: %w", err)
 	}
 	return service, nil
+}
+
+// parseClaudeConfigDirs expands a leading ~/ (~\ on Windows) in each
+// --claude-config-dir value, since the shell leaves it alone in
+// --flag=~/dir and in hook or systemd arguments, and requires every value
+// to be an existing directory.
+// The home directory, and a value that is itself a config directory's
+// "projects" directory, are rejected, since the transcripts would be
+// looked for in the wrong place.
+func parseClaudeConfigDirs(values []string) ([]string, error) {
+	dirs := make([]string, 0, len(values))
+	for _, value := range values {
+		dir := value
+		if rest, ok := strings.CutPrefix(filepath.FromSlash(value+"/"), filepath.FromSlash("~/")); ok {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return nil, fmt.Errorf("invalid --claude-config-dir %q: %w", value, err)
+			}
+			dir = filepath.Join(home, rest)
+		}
+		if dir == "" {
+			return nil, errors.New("invalid --claude-config-dir: must not be empty")
+		}
+		dir, err := filepath.Abs(dir)
+		if err != nil {
+			return nil, fmt.Errorf("invalid --claude-config-dir %q: %w", value, err)
+		}
+		info, err := os.Stat(dir)
+		if err != nil {
+			return nil, fmt.Errorf("invalid --claude-config-dir %q: %w", value, err)
+		}
+		if !info.IsDir() {
+			return nil, fmt.Errorf("invalid --claude-config-dir %q: not a directory", value)
+		}
+		if home, err := os.UserHomeDir(); err == nil {
+			if homeInfo, err := os.Stat(home); err == nil && os.SameFile(info, homeInfo) {
+				return nil, fmt.Errorf("invalid --claude-config-dir %q: this is the home directory; pass the Claude Code config directory, e.g. ~/.claude-work", value)
+			}
+		}
+		if filepath.Base(dir) == "projects" {
+			if _, err := os.Stat(filepath.Join(dir, "projects")); errors.Is(err, fs.ErrNotExist) {
+				return nil, fmt.Errorf("invalid --claude-config-dir %q: this is the transcripts directory; pass its parent, the Claude Code config directory", value)
+			}
+		}
+		dirs = append(dirs, dir)
+	}
+	return dirs, nil
+}
+
+// sessionDirs lists where Claude Code's own session transcripts are
+// looked for: ~/.claude first, then the "projects" directory of each
+// --claude-config-dir, for users who run more than one Claude Code
+// identity (for example CLAUDE_CONFIG_DIR=~/.claude-work for a work
+// account) through the same proxy.
+func sessionDirs(configDirs []string) []string {
+	dirs := sessionlog.DefaultDirs()
+	for _, dir := range configDirs {
+		projects := filepath.Join(dir, "projects")
+		if !slices.ContainsFunc(dirs, func(seen string) bool { return sameDir(seen, projects) }) {
+			dirs = append(dirs, projects)
+		}
+	}
+	return dirs
+}
+
+// sameDir reports whether a and b name the same directory, also when one
+// is reached through a symlink.
+func sameDir(a, b string) bool {
+	if a == b {
+		return true
+	}
+	infoA, errA := os.Stat(a)
+	infoB, errB := os.Stat(b)
+	return errA == nil && errB == nil && os.SameFile(infoA, infoB)
 }
 
 func serve(ctx context.Context, listen, uiListen, uiToken string, turns *history.Log, notifications *push.Service, upstream *url.URL, logger *slog.Logger, version string, opts proxy.Options) error {

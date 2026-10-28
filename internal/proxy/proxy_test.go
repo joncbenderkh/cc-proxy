@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/joncbenderkh/cc-proxy/internal/feed"
-	"github.com/joncbenderkh/cc-proxy/internal/sessionlog"
 )
 
 const secretKey = "sk-ant-test-secret"
@@ -399,9 +398,6 @@ func TestBackfillsSessionFromLocalTranscript(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(sessionDir, "session-1.jsonl"), []byte(transcriptBody), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	original := sessionlog.Dir
-	sessionlog.Dir = sessionsDir
-	defer func() { sessionlog.Dir = original }()
 
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		io.Copy(io.Discard, r.Body)
@@ -410,7 +406,7 @@ func TestBackfillsSessionFromLocalTranscript(t *testing.T) {
 	defer backend.Close()
 	target, _ := url.Parse(backend.URL)
 	turns := make(chan feed.Turn, 2)
-	front := httptest.NewServer(New(target, slog.New(slog.NewJSONHandler(io.Discard, nil)), Options{OnTurn: func(turn feed.Turn) { turns <- turn }}))
+	front := httptest.NewServer(New(target, slog.New(slog.NewJSONHandler(io.Discard, nil)), Options{OnTurn: func(turn feed.Turn) { turns <- turn }, SessionDirs: []string{sessionsDir}}))
 	defer front.Close()
 
 	for i := 0; i < 2; i++ {

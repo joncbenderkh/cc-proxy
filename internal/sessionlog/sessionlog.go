@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // Package sessionlog reads Claude Code's own local transcript of a
-// session (~/.claude/projects/<encoded-cwd>/<session-id>.jsonl) so a
-// session's working directory, branch, title and account email can be
-// known before any request for it has passed through the proxy. This is
-// a read-only, best-effort supplement to the traffic the proxy relays;
-// its file format is Claude Code's own and undocumented, so a lookup
-// that fails or finds nothing is not an error.
+// session (<config dir>/projects/<encoded-cwd>/<session-id>.jsonl,
+// normally under ~/.claude) so a session's working directory, branch,
+// title and account email can be known before any request for it has
+// passed through the proxy. This is a read-only, best-effort supplement
+// to the traffic the proxy relays; its file format is Claude Code's own
+// and undocumented, so a lookup that fails or finds nothing is not an
+// error.
 package sessionlog
 
 import (
@@ -32,31 +33,69 @@ type Session struct {
 // so a very long-running session doesn't make a lookup slow.
 const maxScan = 2000
 
-// Dir is the directory Claude Code writes session transcripts under. A
-// package variable so tests can point it elsewhere.
-var Dir = defaultDir()
-
-func defaultDir() string {
+// DefaultDirs returns the projects directory of the default Claude Code
+// config directory, ~/.claude, or nothing when the home directory is
+// unknown. Running more than one Claude Code identity (each launched with
+// its own CLAUDE_CONFIG_DIR, such as CLAUDE_CONFIG_DIR=~/.claude-work)
+// means searching their projects directories too.
+func DefaultDirs() []string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return ""
+		return nil
 	}
-	return filepath.Join(home, ".claude", "projects")
+	return []string{filepath.Join(home, ".claude", "projects")}
 }
 
-// Find looks up the local transcript of sessionID and reads as much of
-// Session as it can find in its first lines. It reports false when no
-// transcript is found or none of these fields appear in it.
-func Find(sessionID string) (Session, bool) {
-	if Dir == "" || sessionID == "" {
+// Find looks up the local transcript of sessionID across dirs, the
+// "projects" directories of one or more Claude Code config directories
+// searched in order, and reads
+// as much of Session as it can find in its first lines. It reports false
+// when no transcript is found or none of these fields appear in it.
+// Session ids are unique per launch, so the first directory with a
+// matching transcript is authoritative; the rest are not searched.
+func Find(dirs []string, sessionID string) (Session, bool) {
+	if !validSessionID(sessionID) {
 		return Session{}, false
 	}
-	matches, err := filepath.Glob(filepath.Join(Dir, "*", sessionID+".jsonl"))
-	if err != nil || len(matches) == 0 {
-		return Session{}, false
+	for _, dir := range dirs {
+		path, ok := transcriptPath(dir, sessionID)
+		if !ok {
+			continue
+		}
+		session := read(path)
+		return session, session != Session{}
 	}
-	session := read(matches[0])
-	return session, session != Session{}
+	return Session{}, false
+}
+
+// validSessionID accepts only the characters of Claude Code's session
+// ids (UUIDs). The id comes from a request header, so anything else
+// could name a path outside the transcript directories.
+func validSessionID(sessionID string) bool {
+	if sessionID == "" {
+		return false
+	}
+	for _, r := range sessionID {
+		if !('a' <= r && r <= 'z' || 'A' <= r && r <= 'Z' || '0' <= r && r <= '9' || r == '-') {
+			return false
+		}
+	}
+	return true
+}
+
+// transcriptPath finds sessionID's transcript in one of dir's project
+// subdirectories, taking dir literally rather than as a glob pattern.
+func transcriptPath(dir, sessionID string) (string, bool) {
+	// ReadDir returns the entries read before an error, so those are
+	// still searched.
+	projects, _ := os.ReadDir(dir)
+	for _, project := range projects {
+		path := filepath.Join(dir, project.Name(), sessionID+".jsonl")
+		if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() {
+			return path, true
+		}
+	}
+	return "", false
 }
 
 // line is the subset of Claude Code's transcript line shapes this
