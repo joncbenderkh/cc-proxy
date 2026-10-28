@@ -226,16 +226,27 @@ function selectedSession() {
 }
 
 function project(session) {
-  if (session.branch) return (repoName(session.remote) || basename(session.cwd)) + ":" + session.branch;
+  if (session.branch) return (repoLabel(session) || basename(session.cwd)) + ":" + session.branch;
   if (session.cwd) return basename(session.cwd);
   return "Session " + session.id.slice(0, 8);
 }
 
+// repoLabel names the session's repo, adding the owner when another
+// session on the same branch has a different remote with the same name,
+// such as a fork and its upstream.
+function repoLabel(session) {
+  const name = repoName(session.remote);
+  const clash = name && [...sessions.values()].some(other => other.branch === session.branch &&
+    other.remote !== session.remote && repoName(other.remote) === name);
+  return clash ? repoName(session.remote, 2) : name;
+}
+
 // repoName turns a remote URL such as git@github.com:u/repo.git or
-// https://github.com/u/repo into "repo".
-function repoName(remote) {
-  const name = (remote || "").replace(/\/+$/, "").replace(/\.git$/i, "").replace(/[\\/]+$/, "").split(/[\\/:]/).pop();
-  return name === "." || name === ".." ? "" : name;
+// https://github.com/u/repo into "repo", or "u/repo" with parts = 2.
+function repoName(remote, parts = 1) {
+  const path = (remote || "").replace(/\/+$/, "").replace(/\.git$/i, "").split(/[\\/:]/).filter(Boolean);
+  const name = path.at(-1);
+  return !name || name === "." || name === ".." ? "" : path.slice(-parts).join("/");
 }
 
 function basename(path) {

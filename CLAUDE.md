@@ -111,7 +111,9 @@ across restarts: turns are appended as JSON lines and the file is
 rewritten to the newest 500 once it holds 1000, and turn numbers continue
 where the last run stopped. The page opens on a list of sessions (labelled
 `<repo>:<branch>`, the repo name taken from the remote URL in the `.git`
-of the system prompt's working directory, else its basename; title from
+of the system prompt's working directory, as `owner/repo` when another
+session on that branch has a different remote of the same name, else the
+directory's basename; title from
 the first prompt, Claude account email, status, activity and cost),
 sorted with those needing an answer first, under a line giving the
 session count and that order; the header shows the feed's connection
