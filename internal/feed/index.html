@@ -35,6 +35,8 @@ header {
 h1 { font-size: 16px; margin: 0; }
 #dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bad); }
 #dot.live { background: var(--ok); }
+#connection { color: var(--muted); font-size: 13px; white-space: nowrap; }
+#connection a { color: var(--accent); }
 #back { color: var(--accent); text-decoration: none; font-size: 22px; line-height: 1; padding: 0 4px; }
 #heading { flex: 1 1 0; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #total { color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -78,6 +80,10 @@ main { max-width: 760px; margin: 0 auto; padding: 12px 16px 48px; }
 .result.error { border-left: 3px solid var(--bad); }
 details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 #empty { color: var(--muted); text-align: center; margin-top: 40px; }
+#overview { margin: 0 0 10px; align-items: center; }
+#notify { margin-left: auto; }
+#overview[hidden] { display: none; }
+.screen-reader-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 #dock { position: sticky; bottom: 0; padding-bottom: env(safe-area-inset-bottom); }
 .approval {
   background: var(--surface); border: 2px solid var(--accent); border-radius: 10px;
@@ -106,13 +112,17 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 </head>
 <body>
 <header>
-  <span id="dot" title="disconnected"></span>
   <a id="back" href="#" aria-label="All sessions" hidden>‹</a>
   <h1 id="heading">cc-proxy</h1>
   <span id="total"></span>
-  <button id="notify" type="button" hidden>Notify me</button>
+  <span id="dot" title="connecting" aria-hidden="true"></span>
+  <span id="connection" role="status">connecting</span>
 </header>
 <main>
+  <div id="overview" class="meta" hidden>
+    <span id="overview-text"></span>
+    <button id="notify" type="button" hidden>Notify me</button>
+  </div>
   <p id="empty">Waiting for Claude Code traffic…</p>
   <nav id="sessions" aria-label="Sessions"></nav>
   <div id="turns"></div>
@@ -137,6 +147,9 @@ const back = document.getElementById("back");
 let pending = [];
 const total = document.getElementById("total");
 const dot = document.getElementById("dot");
+const overview = document.getElementById("overview");
+const overviewText = document.getElementById("overview-text");
+const connection = document.getElementById("connection");
 const FOLD = 600;
 const approvals = document.getElementById("approvals");
 const seenApprovals = new Set();
@@ -177,19 +190,19 @@ function usd(value) {
 function render(turn) {
   const card = el("article", "turn");
   const meta = el("div", "meta");
-  meta.append(el("span", "", new Date(turn.time).toLocaleTimeString()));
+  meta.append(el("span", "", "at " + new Date(turn.time).toLocaleTimeString()));
   const message = turn.message;
   if (message) {
     const u = message.usage;
     meta.append(
-      el("span", "", shortModel(message.model)),
-      el("span", "", (u.input_tokens + u.cache_creation_input_tokens + u.cache_read_input_tokens).toLocaleString() + " in · " + u.output_tokens.toLocaleString() + " out"),
+      el("span", "", "model " + shortModel(message.model)),
+      el("span", "", (u.input_tokens + u.cache_creation_input_tokens + u.cache_read_input_tokens).toLocaleString() + " tokens in · " + u.output_tokens.toLocaleString() + " out"),
     );
-    if (message.cost_usd !== undefined) meta.append(el("span", "", usd(message.cost_usd)));
-    if (message.stop_reason) meta.append(el("span", "", message.stop_reason));
+    if (message.cost_usd !== undefined) meta.append(el("span", "", usd(message.cost_usd) + " spent"));
+    if (message.stop_reason) meta.append(el("span", "", "stop: " + message.stop_reason));
   }
   if (turn.status !== 200) meta.append(el("span", "err", "HTTP " + turn.status));
-  meta.append(el("span", "", (turn.duration_ms / 1000).toFixed(1) + " s"));
+  meta.append(el("span", "", "took " + (turn.duration_ms / 1000).toFixed(1) + " s"));
   card.append(meta);
 
   for (const block of turn.prompt || []) {
@@ -214,9 +227,31 @@ function selectedSession() {
 }
 
 function project(session) {
-  if (session.branch) return (session.remote || basename(session.cwd)) + ":" + session.branch;
+  if (session.branch) return (repoLabel(session) || basename(session.cwd)) + ":" + session.branch;
   if (session.cwd) return basename(session.cwd);
   return "Session " + session.id.slice(0, 8);
+}
+
+// repoLabel names the session's repo, adding the owner when another
+// session on the same branch has a different remote with the same name,
+// such as a fork and its upstream. Remotes of one repo in other forms
+// (ssh and https) do not count as a clash.
+function repoLabel(session) {
+  const name = repoName(session.remote);
+  const owned = repoName(session.remote, 2);
+  const clash = name && [...sessions.values()].some(other => other.branch === session.branch &&
+    repoName(other.remote) === name && repoName(other.remote, 2) !== owned);
+  return clash ? owned : name;
+}
+
+// repoName turns a remote URL such as git@github.com:u/repo.git or
+// https://github.com/u/repo into "repo", or "u/repo" with parts = 2. The
+// _git segment of Azure DevOps URLs is skipped.
+function repoName(remote, parts = 1) {
+  const path = (remote || "").replace(/\/+$/, "").replace(/\.git$/i, "").split(/[\\/:]/)
+    .filter(part => part && part !== "_git");
+  const name = path.at(-1);
+  return !name || name === "." || name === ".." ? "" : path.slice(-parts).join("/");
 }
 
 function basename(path) {
@@ -247,14 +282,14 @@ function renderSession(session) {
   top.append(el("span", "project", project(session)), el("span", "badge " + state.kind, state.label));
   card.append(top, el("div", "title" + (session.title ? "" : " none"), session.title || "No prompt yet"));
   const meta = el("div", "meta");
-  meta.append(el("span", "", ago(session.last)));
+  meta.append(el("span", "", "active " + ago(session.last)));
   if (session.turns) meta.append(el("span", "", session.turns + (session.turns === 1 ? " turn" : " turns")));
-  if (session.cost) meta.append(el("span", "", usd(session.cost)));
-  if (session.model) meta.append(el("span", "", shortModel(session.model)));
-  if (session.user) meta.append(el("span", "", session.user));
-  meta.append(el("span", "", session.id.slice(0, 8)));
+  if (session.cost) meta.append(el("span", "", usd(session.cost) + " spent"));
+  if (session.model) meta.append(el("span", "", "model " + shortModel(session.model)));
+  if (session.user) meta.append(el("span", "", "account " + session.user));
+  meta.append(el("span", "", "session " + session.id.slice(0, 8)));
   card.append(meta);
-  if (session.cwd) card.title = session.cwd;
+  card.title = [session.remote, session.cwd].filter(Boolean).join("\n");
   return card;
 }
 
@@ -264,7 +299,10 @@ function showSessions() {
   all.sort((a, b) => urgent(b) - urgent(a) || new Date(b.last) - new Date(a.last));
   sessionList.replaceChildren(...all.map(renderSession));
   const cost = all.reduce((sum, session) => sum + session.cost, 0);
-  total.textContent = all.length ? usd(cost) : "";
+  total.textContent = all.length ? usd(cost) + " total" : "";
+  overview.hidden = !all.length && notifyButton.hidden;
+  overviewText.textContent = !all.length ? "" : (all.length === 1 ? "1 session" : all.length + " sessions") +
+    " · those waiting on you first, then by last activity";
   document.getElementById("empty").hidden = all.length > 0;
 }
 
@@ -273,6 +311,7 @@ function redraw() {
   const session = sessions.get(id);
   back.hidden = !id;
   sessionList.hidden = !!id;
+  overview.hidden = !!id;
   list.hidden = !id;
   if (!id) {
     heading.textContent = "cc-proxy";
@@ -282,7 +321,7 @@ function redraw() {
     heading.textContent = session ? project(session) + (session.title ? " · " + session.title : "") : "Session " + id.slice(0, 8);
     const shown = turns.filter(turn => turn.session_id === id);
     list.replaceChildren(...shown.map(render));
-    total.textContent = session && session.cost ? usd(session.cost) : "";
+    total.textContent = session && session.cost ? usd(session.cost) + " spent" : "";
     document.getElementById("empty").hidden = shown.length > 0;
   }
   showComposer();
@@ -427,6 +466,7 @@ async function enableNotifications() {
     const subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: base64url(key) });
     await saveSubscription(subscription, true);
     notifyButton.hidden = true;
+    if (!selectedSession()) showSessions();
   } catch (failure) {
     notifyButton.title = failure.message;
     notifyButton.textContent = "Notify me (failed)";
@@ -449,6 +489,7 @@ async function setUpNotifications() {
   }
   notifyButton.hidden = false;
   notifyButton.onclick = enableNotifications;
+  if (!selectedSession()) showSessions();
 }
 
 setUpNotifications().catch(() => {});
@@ -460,34 +501,104 @@ promptBox.addEventListener("keydown", event => {
 });
 
 const nearBottom = () => window.innerHeight + window.scrollY >= document.body.scrollHeight - 80;
-const events = new EventSource("events");
-events.onopen = () => { dot.className = "live"; dot.title = "live"; };
-events.onerror = () => { dot.className = ""; dot.title = "reconnecting"; };
-events.addEventListener("approvals", event => {
-  pending = JSON.parse(event.data);
-  pending.forEach(request => track(request, false));
-  showApprovals();
-  if (!selectedSession()) showSessions();
-});
-events.addEventListener("idle", event => {
-  idle = JSON.parse(event.data);
-  idle.forEach(entry => track(entry, false));
-  if (!selectedSession()) showSessions();
-  showComposer();
-});
-events.addEventListener("turn", event => {
-  const turn = JSON.parse(event.data);
-  if (turn.backfill) {
-    track(turn, false);
-    if (!selectedSession()) showSessions();
+function setConnection(state) {
+  dot.className = state === "live" ? "live" : "";
+  dot.title = state;
+  // Screen readers still hear "live" from the status text.
+  connection.className = state === "live" ? "screen-reader-only" : "";
+  if (state !== "offline") {
+    // Live is the normal state, so the green dot alone says it and the
+    // session name keeps the room on a phone.
+    connection.textContent = state;
     return;
   }
-  const follow = nearBottom();
-  turns.push(turn);
-  track(turn, true);
-  redraw();
-  if (follow && selectedSession()) window.scrollTo(0, document.body.scrollHeight);
-});
+  // A reload lands on the login form if the cookie is no longer valid.
+  const reload = el("a", "", "offline, reload");
+  reload.href = "./";
+  reload.onclick = event => { event.preventDefault(); location.reload(); };
+  connection.replaceChildren(reload);
+}
+
+// The browser retries a dropped stream by itself, but gives up for good on
+// an error response, such as the 502 a proxy in front (tailscale serve)
+// returns while cc-proxy restarts. Reopen it with backoff unless the login
+// is no longer valid. A reopened stream replays every remembered turn, and
+// turn numbers restart when the server runs without a history file, so the
+// page is rebuilt from that replay; a stream the browser resumed by itself
+// is not rebuilt. The login probe can use any guarded path: the auth guard
+// answers 401 before push/key's own handler runs.
+let events;
+let retryDelay = 2000;
+// The scroll position to restore once a replay ends, or null.
+let replayScroll = null;
+
+async function retryClosed() {
+  setConnection("reconnecting");
+  const timeout = new AbortController();
+  setTimeout(() => timeout.abort(), 10000);
+  const probe = { cache: "no-store", signal: timeout.signal };
+  const status = await fetch("push/key", probe).then(response => response.status, () => 0);
+  if (status === 401) {
+    setConnection("offline");
+    return;
+  }
+  setTimeout(() => connect(true), retryDelay);
+  retryDelay = Math.min(retryDelay * 2, 30000);
+}
+
+function connect(replay) {
+  events = new EventSource("events");
+  events.onopen = () => {
+    if (replay) {
+      replayScroll = window.scrollY;
+      turns.length = 0;
+      sessions.clear();
+      pending = [];
+      idle = [];
+      replay = false;
+      showApprovals();
+      redraw();
+    }
+    retryDelay = 2000;
+    setConnection("live");
+  };
+  events.onerror = () => {
+    if (events.readyState === EventSource.CLOSED) retryClosed();
+    else setConnection("reconnecting");
+  };
+  events.addEventListener("approvals", event => {
+    pending = JSON.parse(event.data);
+    pending.forEach(request => track(request, false));
+    showApprovals();
+    if (!selectedSession()) showSessions();
+  });
+  events.addEventListener("idle", event => {
+    idle = JSON.parse(event.data);
+    idle.forEach(entry => track(entry, false));
+    if (!selectedSession()) showSessions();
+    showComposer();
+    // The states follow the turns, and idle sorts last, so it ends a replay.
+    if (replayScroll !== null) {
+      window.scrollTo(0, replayScroll);
+      replayScroll = null;
+    }
+  });
+  events.addEventListener("turn", event => {
+    const turn = JSON.parse(event.data);
+    if (turn.backfill) {
+      track(turn, false);
+      if (!selectedSession()) showSessions();
+      return;
+    }
+    const follow = replayScroll === null && nearBottom();
+    turns.push(turn);
+    track(turn, true);
+    redraw();
+    if (follow && selectedSession()) window.scrollTo(0, document.body.scrollHeight);
+  });
+}
+
+connect();
 redraw();
 </script>
 </body>

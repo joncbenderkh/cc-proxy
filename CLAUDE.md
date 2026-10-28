@@ -110,11 +110,20 @@ last 500 turns, which `--history-file` (default
 across restarts: turns are appended as JSON lines and the file is
 rewritten to the newest 500 once it holds 1000, and turn numbers continue
 where the last run stopped. The page opens on a list of sessions (labelled
-`<remote url>:<branch>`, read from the `.git` of the system prompt's working
-directory, else its basename; title from the first prompt, Claude account email, status,
-activity and cost), sorted with those needing an answer first; a session
-opens at `#s=<session_id>`. The first request of a session also triggers a
-one-time, best-effort read of Claude Code's own local transcript
+`<repo>:<branch>`, the repo name taken from the remote URL in the `.git`
+of the system prompt's working directory, as `owner/repo` when another
+session on that branch has a different remote of the same name, else the
+directory's basename; title from
+the first prompt, Claude account email, status, activity and cost),
+sorted with those needing an answer first, under a line giving the
+session count and that order; the header shows the feed's connection
+state on every view, as a green dot while live and in words otherwise.
+A stream the browser gives up on (e.g. a 502 from `tailscale serve`
+while cc-proxy restarts) is reopened with backoff; once the token no
+longer works, the state becomes a reload link, which leads to the login
+form. A session opens at `#s=<session_id>`. The first
+request of a session also triggers a one-time, best-effort read of
+Claude Code's own local transcript
 (`<config dir>/projects/<encoded-cwd>/<session-id>.jsonl`, via
 `internal/sessionlog`) so the card's cwd, branch, title and account email
 appear immediately, without waiting for that request's response; this
@@ -182,7 +191,7 @@ variable is needed:
 ```
 
 Push notifications reach a phone without the page open. "Notify me" on
-the page subscribes the browser (standard Web Push, no third-party
+the session list subscribes the browser (standard Web Push, no third-party
 service beyond the browser's own push service); it needs a secure
 context, so use the `tailscale serve` URL, and on iOS 16.4+ the page must
 first be added to the Home Screen. A new permission prompt pushes at
