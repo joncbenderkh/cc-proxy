@@ -185,7 +185,7 @@ variable is needed:
 ```
 
 Push notifications reach a phone without the page open. "Notify me" on
-the page subscribes the browser (standard Web Push, no third-party
+the session list subscribes the browser (standard Web Push, no third-party
 service beyond the browser's own push service); it needs a secure
 context, so use the `tailscale serve` URL, and on iOS 16.4+ the page must
 first be added to the Home Screen. A new permission prompt pushes at

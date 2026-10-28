@@ -79,7 +79,8 @@ main { max-width: 760px; margin: 0 auto; padding: 12px 16px 48px; }
 .result.error { border-left: 3px solid var(--bad); }
 details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 #empty { color: var(--muted); text-align: center; margin-top: 40px; }
-#overview { margin: 0 0 10px; }
+#overview { margin: 0 0 10px; align-items: center; }
+#notify { margin-left: auto; }
 #overview[hidden] { display: none; }
 #dock { position: sticky; bottom: 0; padding-bottom: env(safe-area-inset-bottom); }
 .approval {
@@ -114,11 +115,13 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
   <span id="total"></span>
   <span id="dot"></span>
   <span id="connection">connecting</span>
-  <button id="notify" type="button" hidden>Notify me</button>
 </header>
 <main>
+  <div id="overview" class="meta" hidden>
+    <span id="overview-text"></span>
+    <button id="notify" type="button" hidden>Notify me</button>
+  </div>
   <p id="empty">Waiting for Claude Code traffic…</p>
-  <p id="overview" class="meta" hidden></p>
   <nav id="sessions" aria-label="Sessions"></nav>
   <div id="turns"></div>
   <div id="dock">
@@ -143,6 +146,7 @@ let pending = [];
 const total = document.getElementById("total");
 const dot = document.getElementById("dot");
 const overview = document.getElementById("overview");
+const overviewText = document.getElementById("overview-text");
 const connection = document.getElementById("connection");
 const FOLD = 600;
 const approvals = document.getElementById("approvals");
@@ -279,8 +283,8 @@ function showSessions() {
   sessionList.replaceChildren(...all.map(renderSession));
   const cost = all.reduce((sum, session) => sum + session.cost, 0);
   total.textContent = all.length ? usd(cost) + " total" : "";
-  overview.hidden = all.length === 0;
-  overview.textContent = (all.length === 1 ? "1 session" : all.length + " sessions") +
+  overview.hidden = !all.length && notifyButton.hidden;
+  overviewText.textContent = !all.length ? "" : (all.length === 1 ? "1 session" : all.length + " sessions") +
     " · those waiting on you first, then by last activity";
   document.getElementById("empty").hidden = all.length > 0;
 }
@@ -445,6 +449,7 @@ async function enableNotifications() {
     const subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: base64url(key) });
     await saveSubscription(subscription, true);
     notifyButton.hidden = true;
+    if (!selectedSession()) showSessions();
   } catch (failure) {
     notifyButton.title = failure.message;
     notifyButton.textContent = "Notify me (failed)";
@@ -467,6 +472,7 @@ async function setUpNotifications() {
   }
   notifyButton.hidden = false;
   notifyButton.onclick = enableNotifications;
+  if (!selectedSession()) showSessions();
 }
 
 setUpNotifications().catch(() => {});
