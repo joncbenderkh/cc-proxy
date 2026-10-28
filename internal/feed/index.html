@@ -229,8 +229,8 @@ function project(session) {
 // repoName turns a remote URL such as git@github.com:u/repo.git or
 // https://github.com/u/repo into "repo".
 function repoName(remote) {
-  const name = (remote || "").replace(/\/+$/, "").replace(/\.git$/i, "").split(/[\\/:]/).pop();
-  return name === "." ? "" : name;
+  const name = (remote || "").replace(/\/+$/, "").replace(/\.git$/i, "").replace(/[\\/]+$/, "").split(/[\\/:]/).pop();
+  return name === "." || name === ".." ? "" : name;
 }
 
 function basename(path) {
