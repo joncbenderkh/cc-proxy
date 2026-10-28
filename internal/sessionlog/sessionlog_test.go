@@ -22,8 +22,7 @@ func writeSession(t *testing.T, dir, project, sessionID, content string) {
 
 func TestFind(t *testing.T) {
 	dir := t.TempDir()
-	Dirs = []string{dir}
-	t.Cleanup(func() { Dirs = defaultDirs() })
+	dirs := []string{dir}
 
 	writeSession(t, dir, "-home-u-proj", "s1", `
 {"type":"user","message":{"role":"user","content":"<local-command-caveat>ignored</local-command-caveat>"},"isMeta":true,"cwd":"/home/u/proj","gitBranch":"main"}
@@ -46,7 +45,7 @@ func TestFind(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, ok := Find(tt.sessionID)
+			got, ok := Find(dirs, tt.sessionID)
 			if ok != tt.wantOK || got != tt.want {
 				t.Errorf("Find(%q) = %+v, %v; want %+v, %v", tt.sessionID, got, ok, tt.want, tt.wantOK)
 			}
@@ -55,23 +54,21 @@ func TestFind(t *testing.T) {
 }
 
 func TestFindNoDirs(t *testing.T) {
-	Dirs = []string{filepath.Join(t.TempDir(), "missing")}
-	t.Cleanup(func() { Dirs = defaultDirs() })
-	if _, ok := Find("s1"); ok {
+	dirs := []string{filepath.Join(t.TempDir(), "missing")}
+	if _, ok := Find(dirs, "s1"); ok {
 		t.Error("Find() = true for a nonexistent projects directory, want false")
 	}
 }
 
 func TestFindAcrossMultipleDirs(t *testing.T) {
 	first, second := t.TempDir(), t.TempDir()
-	Dirs = []string{first, second}
-	t.Cleanup(func() { Dirs = defaultDirs() })
+	dirs := []string{first, second}
 
 	writeSession(t, second, "-home-u-proj", "s1", `
 {"type":"user","message":{"role":"user","content":"fix the build"},"cwd":"/home/u/proj","gitBranch":"main"}
 `)
 
-	got, ok := Find("s1")
+	got, ok := Find(dirs, "s1")
 	want := Session{Cwd: "/home/u/proj", Branch: "main", Title: "fix the build"}
 	if !ok || got != want {
 		t.Errorf("Find(%q) = %+v, %v; want %+v, true", "s1", got, ok, want)
@@ -80,8 +77,7 @@ func TestFindAcrossMultipleDirs(t *testing.T) {
 
 func TestFindFirstDirWins(t *testing.T) {
 	first, second := t.TempDir(), t.TempDir()
-	Dirs = []string{first, second}
-	t.Cleanup(func() { Dirs = defaultDirs() })
+	dirs := []string{first, second}
 
 	writeSession(t, first, "-home-u-a", "s1", `
 {"type":"user","message":{"role":"user","content":"first"}}
@@ -90,36 +86,34 @@ func TestFindFirstDirWins(t *testing.T) {
 {"type":"user","message":{"role":"user","content":"second"}}
 `)
 
-	if got, _ := Find("s1"); got.Title != "first" {
+	if got, _ := Find(dirs, "s1"); got.Title != "first" {
 		t.Errorf("Find(%q).Title = %q, want %q", "s1", got.Title, "first")
 	}
 }
 
 func TestFindTakesDirLiterally(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), ".claude-[work]", "projects")
-	Dirs = []string{dir}
-	t.Cleanup(func() { Dirs = defaultDirs() })
+	dirs := []string{dir}
 
 	writeSession(t, dir, "-home-u-proj", "s1", `
 {"type":"user","message":{"role":"user","content":"fix the build"}}
 `)
 
-	if _, ok := Find("s1"); !ok {
+	if _, ok := Find(dirs, "s1"); !ok {
 		t.Errorf("Find(%q) = false for a directory name with glob characters, want true", "s1")
 	}
 }
 
 func TestFindRejectsPatternSessionIDs(t *testing.T) {
 	dir := t.TempDir()
-	Dirs = []string{dir}
-	t.Cleanup(func() { Dirs = defaultDirs() })
+	dirs := []string{dir}
 
 	writeSession(t, dir, "-home-u-proj", "s1", `
 {"type":"user","message":{"role":"user","content":"secret"}}
 `)
 
 	for _, id := range []string{"*", "s?", "[s]1", "../-home-u-proj/s1"} {
-		if got, ok := Find(id); ok {
+		if got, ok := Find(dirs, id); ok {
 			t.Errorf("Find(%q) = %+v, true; want false", id, got)
 		}
 	}
@@ -127,8 +121,7 @@ func TestFindRejectsPatternSessionIDs(t *testing.T) {
 
 func TestFindFollowsSymlinkedProjects(t *testing.T) {
 	dir, target := t.TempDir(), t.TempDir()
-	Dirs = []string{dir}
-	t.Cleanup(func() { Dirs = defaultDirs() })
+	dirs := []string{dir}
 
 	writeSession(t, target, "proj", "s1", `
 {"type":"user","message":{"role":"user","content":"fix the build"}}
@@ -137,7 +130,7 @@ func TestFindFollowsSymlinkedProjects(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, ok := Find("s1"); !ok {
+	if _, ok := Find(dirs, "s1"); !ok {
 		t.Errorf("Find(%q) = false for a symlinked project directory, want true", "s1")
 	}
 }

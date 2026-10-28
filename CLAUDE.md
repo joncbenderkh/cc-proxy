@@ -92,7 +92,8 @@ go run . --log-requests                                    # also log outbound h
 go run . --log-responses                                   # also log response headers + bodies
 go run . --pretty                                          # indented JSON log records
 go run . --ui-listen 127.0.0.1:8788                        # live feed web page
-go run . --ui-listen 127.0.0.1:8788 --claude-config-dir ~/.claude-work  # also read a second identity's sessions
+go run . --ui-listen 127.0.0.1:8788 \
+  --claude-config-dir ~/.claude-work                       # also a second identity's sessions
 go run . hook stop --ui-url http://127.0.0.1:8788          # Stop hook (reads hook input on stdin)
 ```
 
@@ -121,7 +122,10 @@ never counts toward the session's turns or appears in its timeline.
 `~/.claude` is always searched; running more than one Claude Code identity
 concurrently (each launched with its own `CLAUDE_CONFIG_DIR`, such as
 `CLAUDE_CONFIG_DIR=~/.claude-work`) means adding its directory too with a
-repeated `--claude-config-dir`. Both
+repeated `--claude-config-dir` (e.g.
+`--claude-config-dir ~/.claude-work`; a leading `~/` is expanded, and the
+directory must exist and be neither the home directory nor the `projects`
+transcripts directory inside a config directory). Both
 require the token in `--ui-token-file` (default
 `<user config dir>/cc-proxy/ui-token`, created 0600 on first run; delete it
 to rotate): open `/login?token=…` or paste it into the login form once to

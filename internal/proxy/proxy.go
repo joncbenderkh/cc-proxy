@@ -39,6 +39,9 @@ type Options struct {
 	// every POST /v1/messages request once it has been sent upstream in
 	// full. It runs on the transport's goroutine, so it must not block.
 	OnRequestSent func(sessionID string, request []byte)
+	// SessionDirs are the Claude Code "projects" directories searched, in
+	// order, for a new session's local transcript; see sessionlog.Find.
+	SessionDirs []string
 }
 
 // New returns a handler that forwards every request to upstream unchanged,
@@ -73,7 +76,7 @@ func logExchanges(next http.Handler, logger *slog.Logger, opts Options) http.Han
 		reportsSent := createsMessage && opts.OnRequestSent != nil
 		if opts.OnTurn != nil && sessionID != "" {
 			if _, seen := seenSessions.LoadOrStore(sessionID, struct{}{}); !seen {
-				go backfillSession(opts.OnTurn, sessionID)
+				go backfillSession(opts.OnTurn, opts.SessionDirs, sessionID)
 			}
 		}
 		var capture *requestCapture
@@ -155,8 +158,8 @@ func logExchanges(next http.Handler, logger *slog.Logger, opts Options) http.Han
 // to complete. It runs off the request path since it reads a file from
 // disk; a session with no local transcript, such as one authenticating
 // with an API key rather than the Claude Code CLI, publishes nothing.
-func backfillSession(onTurn func(feed.Turn), sessionID string) {
-	session, ok := sessionlog.Find(sessionID)
+func backfillSession(onTurn func(feed.Turn), sessionDirs []string, sessionID string) {
+	session, ok := sessionlog.Find(sessionDirs, sessionID)
 	if !ok {
 		return
 	}

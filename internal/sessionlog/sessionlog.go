@@ -33,15 +33,12 @@ type Session struct {
 // so a very long-running session doesn't make a lookup slow.
 const maxScan = 2000
 
-// Dirs are the "projects" directories, one per Claude Code config
-// directory, searched in order for a session's transcript. It defaults to
-// just ~/.claude/projects; running more than one Claude Code identity
-// (each launched with its own CLAUDE_CONFIG_DIR, such as
-// CLAUDE_CONFIG_DIR=~/.claude-work) means adding their directories too. A
-// package variable so tests can point it elsewhere.
-var Dirs = defaultDirs()
-
-func defaultDirs() []string {
+// DefaultDirs returns the projects directory of the default Claude Code
+// config directory, ~/.claude, or nothing when the home directory is
+// unknown. Running more than one Claude Code identity (each launched with
+// its own CLAUDE_CONFIG_DIR, such as CLAUDE_CONFIG_DIR=~/.claude-work)
+// means searching their projects directories too.
+func DefaultDirs() []string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil
@@ -49,16 +46,18 @@ func defaultDirs() []string {
 	return []string{filepath.Join(home, ".claude", "projects")}
 }
 
-// Find looks up the local transcript of sessionID across Dirs and reads
+// Find looks up the local transcript of sessionID across dirs, the
+// "projects" directories of one or more Claude Code config directories
+// searched in order, and reads
 // as much of Session as it can find in its first lines. It reports false
 // when no transcript is found or none of these fields appear in it.
 // Session ids are unique per launch, so the first directory with a
 // matching transcript is authoritative; the rest are not searched.
-func Find(sessionID string) (Session, bool) {
+func Find(dirs []string, sessionID string) (Session, bool) {
 	if !validSessionID(sessionID) {
 		return Session{}, false
 	}
-	for _, dir := range Dirs {
+	for _, dir := range dirs {
 		path, ok := transcriptPath(dir, sessionID)
 		if !ok {
 			continue

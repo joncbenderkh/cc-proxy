@@ -6,8 +6,11 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/joncbenderkh/cc-proxy/internal/sessionlog"
 )
 
 func execute(args ...string) (string, error) {
@@ -23,6 +26,10 @@ func execute(args ...string) (string, error) {
 func TestRejectsInvalidArguments(t *testing.T) {
 	tokenFile := filepath.Join(t.TempDir(), "ui-token")
 	if err := os.WriteFile(tokenFile, []byte("abcdefghijklmnopqrstuvwxyz234567\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	projectsDir := filepath.Join(t.TempDir(), ".claude-work", "projects")
+	if err := os.MkdirAll(projectsDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	tests := []struct {
@@ -51,6 +58,10 @@ func TestRejectsInvalidArguments(t *testing.T) {
 		{"history-file unusable", []string{"--ui-listen", "127.0.0.1:0", "--ui-token-file", tokenFile, "--history-file", "/dev/null/turns.jsonl"}, "invalid --history-file"},
 		{"ui-token-file unusable", []string{"--ui-listen", "127.0.0.1:0", "--ui-token-file", "/dev/null/ui-token"}, "invalid --ui-token-file"},
 		{"claude-config-dir without ui-listen", []string{"--claude-config-dir", "/tmp/x"}, "--claude-config-dir requires --ui-listen"},
+		{"claude-config-dir empty", []string{"--ui-listen", "127.0.0.1:0", "--ui-token-file", tokenFile, "--claude-config-dir", ""}, "invalid --claude-config-dir"},
+		{"claude-config-dir missing", []string{"--ui-listen", "127.0.0.1:0", "--ui-token-file", tokenFile, "--claude-config-dir", filepath.Join(t.TempDir(), "missing")}, "invalid --claude-config-dir"},
+		{"claude-config-dir is the projects dir", []string{"--ui-listen", "127.0.0.1:0", "--ui-token-file", tokenFile, "--claude-config-dir", projectsDir}, "pass its parent"},
+		{"claude-config-dir not a directory", []string{"--ui-listen", "127.0.0.1:0", "--ui-token-file", tokenFile, "--claude-config-dir", tokenFile}, "invalid --claude-config-dir"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -118,5 +129,44 @@ func TestLoggerSendsOnlyErrorsToStderr(t *testing.T) {
 	}
 	if got := stderr.String(); strings.Count(got, "\n") != 1 || !strings.Contains(got, `"msg":"upstream request failed"`) || !strings.Contains(got, `"component":"proxy"`) {
 		t.Errorf("stderr = %q", got)
+	}
+}
+
+func TestSessionDirs(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	work := t.TempDir()
+	if err := os.Mkdir(filepath.Join(work, "projects"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	linked := filepath.Join(t.TempDir(), "work-link")
+	if err := os.Symlink(work, linked); err != nil {
+		t.Skip("symlinks unavailable:", err)
+	}
+	got := sessionDirs([]string{work, work, linked, filepath.Dir(sessionlog.DefaultDirs()[0])})
+	want := append(sessionlog.DefaultDirs(), filepath.Join(work, "projects"))
+	if !slices.Equal(got, want) {
+		t.Errorf("sessionDirs() = %q, want %q", got, want)
+	}
+}
+
+func TestParseClaudeConfigDirsExpandsHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	work := filepath.Join(home, ".claude-work")
+	if err := os.Mkdir(work, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(home)
+	got, err := parseClaudeConfigDirs([]string{"~/.claude-work", ".claude-work"})
+	if want := []string{work, work}; err != nil || !slices.Equal(got, want) {
+		t.Errorf("parseClaudeConfigDirs(~/.claude-work, .claude-work) = %q, %v; want %q, nil", got, err, want)
+	}
+	for _, value := range []string{"~", home, "."} {
+		if _, err := parseClaudeConfigDirs([]string{value}); err == nil || !strings.Contains(err.Error(), "home directory") {
+			t.Errorf("parseClaudeConfigDirs(%q) err = %v, want the home directory rejected", value, err)
+		}
 	}
 }

@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
@@ -25,6 +26,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -89,6 +91,10 @@ func newRootCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			configDirs, err := parseClaudeConfigDirs(claudeConfigDirs)
+			if err != nil {
+				return err
+			}
 			cmd.SilenceUsage = true
 			logger := newLogger(cmd.OutOrStdout(), cmd.ErrOrStderr(), pretty)
 			var token string
@@ -98,7 +104,6 @@ func newRootCommand() *cobra.Command {
 				if token, err = loadUIToken(uiTokenFile, logger); err != nil {
 					return err
 				}
-				addClaudeConfigDirs(claudeConfigDirs)
 				if historyFile != "" || !cmd.Flags().Changed("history-file") {
 					if turns, err = openHistory(historyFile, logger); err != nil {
 						return err
@@ -109,7 +114,7 @@ func newRootCommand() *cobra.Command {
 					return err
 				}
 			}
-			return serve(cmd.Context(), listen, uiListen, token, turns, notifications, upstream, logger, cmd.Version, proxy.Options{LogRequests: logRequests, LogResponses: logResponses})
+			return serve(cmd.Context(), listen, uiListen, token, turns, notifications, upstream, logger, cmd.Version, proxy.Options{LogRequests: logRequests, LogResponses: logResponses, SessionDirs: sessionDirs(configDirs)})
 		},
 	}
 	cmd.SetVersionTemplate("cc-proxy {{.Version}}\n")
@@ -272,14 +277,78 @@ func openPush(logger *slog.Logger) (*push.Service, error) {
 	return service, nil
 }
 
-// addClaudeConfigDirs extends where sessionlog looks for Claude Code's own
-// session transcripts, for users who run more than one Claude Code
-// identity (for example CLAUDE_CONFIG_DIR=~/.claude-work for a work
-// account) through the same proxy. ~/.claude is always searched too.
-func addClaudeConfigDirs(dirs []string) {
-	for _, dir := range dirs {
-		sessionlog.Dirs = append(sessionlog.Dirs, filepath.Join(dir, "projects"))
+// parseClaudeConfigDirs expands a leading ~/ (~\ on Windows) in each
+// --claude-config-dir value, since the shell leaves it alone in
+// --flag=~/dir and in hook or systemd arguments, and requires every value
+// to be an existing directory.
+// The home directory, and a value that is itself a config directory's
+// "projects" directory, are rejected, since the transcripts would be
+// looked for in the wrong place.
+func parseClaudeConfigDirs(values []string) ([]string, error) {
+	dirs := make([]string, 0, len(values))
+	for _, value := range values {
+		dir := value
+		if rest, ok := strings.CutPrefix(filepath.FromSlash(value+"/"), filepath.FromSlash("~/")); ok {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return nil, fmt.Errorf("invalid --claude-config-dir %q: %w", value, err)
+			}
+			dir = filepath.Join(home, rest)
+		}
+		if dir == "" {
+			return nil, errors.New("invalid --claude-config-dir: must not be empty")
+		}
+		dir, err := filepath.Abs(dir)
+		if err != nil {
+			return nil, fmt.Errorf("invalid --claude-config-dir %q: %w", value, err)
+		}
+		info, err := os.Stat(dir)
+		if err != nil {
+			return nil, fmt.Errorf("invalid --claude-config-dir %q: %w", value, err)
+		}
+		if !info.IsDir() {
+			return nil, fmt.Errorf("invalid --claude-config-dir %q: not a directory", value)
+		}
+		if home, err := os.UserHomeDir(); err == nil {
+			if homeInfo, err := os.Stat(home); err == nil && os.SameFile(info, homeInfo) {
+				return nil, fmt.Errorf("invalid --claude-config-dir %q: this is the home directory; pass the Claude Code config directory, e.g. ~/.claude-work", value)
+			}
+		}
+		if filepath.Base(dir) == "projects" {
+			if _, err := os.Stat(filepath.Join(dir, "projects")); errors.Is(err, fs.ErrNotExist) {
+				return nil, fmt.Errorf("invalid --claude-config-dir %q: this is the transcripts directory; pass its parent, the Claude Code config directory", value)
+			}
+		}
+		dirs = append(dirs, dir)
 	}
+	return dirs, nil
+}
+
+// sessionDirs lists where Claude Code's own session transcripts are
+// looked for: ~/.claude first, then the "projects" directory of each
+// --claude-config-dir, for users who run more than one Claude Code
+// identity (for example CLAUDE_CONFIG_DIR=~/.claude-work for a work
+// account) through the same proxy.
+func sessionDirs(configDirs []string) []string {
+	dirs := sessionlog.DefaultDirs()
+	for _, dir := range configDirs {
+		projects := filepath.Join(dir, "projects")
+		if !slices.ContainsFunc(dirs, func(seen string) bool { return sameDir(seen, projects) }) {
+			dirs = append(dirs, projects)
+		}
+	}
+	return dirs
+}
+
+// sameDir reports whether a and b name the same directory, also when one
+// is reached through a symlink.
+func sameDir(a, b string) bool {
+	if a == b {
+		return true
+	}
+	infoA, errA := os.Stat(a)
+	infoB, errB := os.Stat(b)
+	return errA == nil && errB == nil && os.SameFile(infoA, infoB)
 }
 
 func serve(ctx context.Context, listen, uiListen, uiToken string, turns *history.Log, notifications *push.Service, upstream *url.URL, logger *slog.Logger, version string, opts proxy.Options) error {
