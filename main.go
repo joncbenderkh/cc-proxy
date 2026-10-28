@@ -123,7 +123,7 @@ func newRootCommand() *cobra.Command {
 	cmd.Flags().StringVar(&uiListen, "ui-listen", "", "serve the live feed web page on this loopback address (host:port); off when empty")
 	cmd.Flags().StringVar(&uiTokenFile, "ui-token-file", "", "file holding the web page login token, created if missing (default <user config dir>/cc-proxy/ui-token)")
 	cmd.Flags().StringVar(&historyFile, "history-file", "", `file keeping the feed's newest turns across restarts (default <user cache dir>/cc-proxy/turns.jsonl; "" turns it off)`)
-	cmd.Flags().StringArrayVar(&claudeConfigDirs, "claude-config-dir", nil, "additional Claude Code config directory to read session transcripts from, e.g. one set via CLAUDE_CONFIG_DIR for a second identity (~/.claude and $CLAUDE_CONFIG_DIR are always included); repeatable")
+	cmd.Flags().StringArrayVar(&claudeConfigDirs, "claude-config-dir", nil, "additional Claude Code config directory to read session transcripts from, e.g. one set via CLAUDE_CONFIG_DIR for a second identity (~/.claude, and $CLAUDE_CONFIG_DIR when set, are always included); repeatable")
 	cmd.Flags().StringVar(&upstreamURL, "upstream", "https://api.anthropic.com", "Anthropic API base URL (http or https)")
 	cmd.Flags().BoolVar(&logRequests, "log-requests", false, "log the headers and body of every request sent upstream (credentials redacted)")
 	cmd.Flags().BoolVar(&logResponses, "log-responses", false, "log the headers and body of every response relayed to the client")

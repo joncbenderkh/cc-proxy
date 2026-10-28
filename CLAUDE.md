@@ -129,7 +129,9 @@ Claude Code's own local transcript
 appear immediately, without waiting for that request's response; this
 never counts toward the session's turns or appears in its timeline.
 `~/.claude` is always searched, and so is `$CLAUDE_CONFIG_DIR` when
-cc-proxy itself runs with it set; running more than one Claude Code identity
+cc-proxy itself runs with it set (taken literally, as Claude Code does: no
+`~` expansion, and a relative value resolves against cc-proxy's working
+directory); running more than one Claude Code identity
 concurrently (each launched with its own `CLAUDE_CONFIG_DIR`, such as
 `CLAUDE_CONFIG_DIR=~/.claude-work`) means adding its directory too with a
 repeated `--claude-config-dir` (e.g.
