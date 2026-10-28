@@ -233,18 +233,22 @@ function project(session) {
 
 // repoLabel names the session's repo, adding the owner when another
 // session on the same branch has a different remote with the same name,
-// such as a fork and its upstream.
+// such as a fork and its upstream. Remotes of one repo in other forms
+// (ssh and https) do not count as a clash.
 function repoLabel(session) {
   const name = repoName(session.remote);
+  const owned = repoName(session.remote, 2);
   const clash = name && [...sessions.values()].some(other => other.branch === session.branch &&
-    other.remote !== session.remote && repoName(other.remote) === name);
-  return clash ? repoName(session.remote, 2) : name;
+    repoName(other.remote) === name && repoName(other.remote, 2) !== owned);
+  return clash ? owned : name;
 }
 
 // repoName turns a remote URL such as git@github.com:u/repo.git or
-// https://github.com/u/repo into "repo", or "u/repo" with parts = 2.
+// https://github.com/u/repo into "repo", or "u/repo" with parts = 2. The
+// _git segment of Azure DevOps URLs is skipped.
 function repoName(remote, parts = 1) {
-  const path = (remote || "").replace(/\/+$/, "").replace(/\.git$/i, "").split(/[\\/:]/).filter(Boolean);
+  const path = (remote || "").replace(/\/+$/, "").replace(/\.git$/i, "").split(/[\\/:]/)
+    .filter(part => part && part !== "_git");
   const name = path.at(-1);
   return !name || name === "." || name === ".." ? "" : path.slice(-parts).join("/");
 }
