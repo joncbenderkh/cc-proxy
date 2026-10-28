@@ -35,7 +35,8 @@ header {
 h1 { font-size: 16px; margin: 0; }
 #dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bad); }
 #dot.live { background: var(--ok); }
-#connection { color: var(--muted); font-size: 13px; }
+#connection { color: var(--muted); font-size: 13px; white-space: nowrap; }
+#connection a { color: var(--accent); }
 #back { color: var(--accent); text-decoration: none; font-size: 22px; line-height: 1; padding: 0 4px; }
 #heading { flex: 1 1 0; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #total { color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -484,38 +485,89 @@ promptBox.addEventListener("keydown", event => {
 });
 
 const nearBottom = () => window.innerHeight + window.scrollY >= document.body.scrollHeight - 80;
-const events = new EventSource("events");
 function setConnection(state) {
   dot.className = state === "live" ? "live" : "";
-  connection.textContent = state;
-}
-events.onopen = () => setConnection("live");
-events.onerror = () => setConnection(events.readyState === EventSource.CLOSED ? "offline" : "reconnecting");
-events.addEventListener("approvals", event => {
-  pending = JSON.parse(event.data);
-  pending.forEach(request => track(request, false));
-  showApprovals();
-  if (!selectedSession()) showSessions();
-});
-events.addEventListener("idle", event => {
-  idle = JSON.parse(event.data);
-  idle.forEach(entry => track(entry, false));
-  if (!selectedSession()) showSessions();
-  showComposer();
-});
-events.addEventListener("turn", event => {
-  const turn = JSON.parse(event.data);
-  if (turn.backfill) {
-    track(turn, false);
-    if (!selectedSession()) showSessions();
+  if (state !== "offline") {
+    connection.textContent = state;
     return;
   }
-  const follow = nearBottom();
-  turns.push(turn);
-  track(turn, true);
-  redraw();
-  if (follow && selectedSession()) window.scrollTo(0, document.body.scrollHeight);
-});
+  // A reload lands on the login form if the cookie is no longer valid.
+  const reload = el("a", "", "offline, reload");
+  reload.href = "./";
+  reload.onclick = event => { event.preventDefault(); location.reload(); };
+  connection.replaceChildren(reload);
+}
+
+// The browser retries a dropped stream by itself, but gives up for good on
+// an error response, such as the 502 a proxy in front (tailscale serve)
+// returns while cc-proxy restarts. Reopen it with backoff unless the login
+// is no longer valid. A reopened stream replays every remembered turn, and
+// turn numbers restart when the server runs without a history file, so the
+// page is rebuilt from that replay; a stream the browser resumed by itself
+// is not rebuilt. The login probe can use any guarded path: the auth guard
+// answers 401 before push/key's own handler runs.
+let events;
+let retryDelay = 2000;
+
+async function retryClosed() {
+  setConnection("reconnecting");
+  const probe = { cache: "no-store", signal: AbortSignal.timeout?.(10000) };
+  const status = await fetch("push/key", probe).then(response => response.status, () => 0);
+  if (status === 401) {
+    setConnection("offline");
+    return;
+  }
+  setTimeout(() => connect(true), retryDelay);
+  retryDelay = Math.min(retryDelay * 2, 30000);
+}
+
+function connect(replay) {
+  events = new EventSource("events");
+  events.onopen = () => {
+    if (replay) {
+      turns.length = 0;
+      sessions.clear();
+      pending = [];
+      idle = [];
+      replay = false;
+      showApprovals();
+      redraw();
+    }
+    retryDelay = 2000;
+    setConnection("live");
+  };
+  events.onerror = () => {
+    if (events.readyState === EventSource.CLOSED) retryClosed();
+    else setConnection("reconnecting");
+  };
+  events.addEventListener("approvals", event => {
+    pending = JSON.parse(event.data);
+    pending.forEach(request => track(request, false));
+    showApprovals();
+    if (!selectedSession()) showSessions();
+  });
+  events.addEventListener("idle", event => {
+    idle = JSON.parse(event.data);
+    idle.forEach(entry => track(entry, false));
+    if (!selectedSession()) showSessions();
+    showComposer();
+  });
+  events.addEventListener("turn", event => {
+    const turn = JSON.parse(event.data);
+    if (turn.backfill) {
+      track(turn, false);
+      if (!selectedSession()) showSessions();
+      return;
+    }
+    const follow = nearBottom();
+    turns.push(turn);
+    track(turn, true);
+    redraw();
+    if (follow && selectedSession()) window.scrollTo(0, document.body.scrollHeight);
+  });
+}
+
+connect();
 redraw();
 </script>
 </body>

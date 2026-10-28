@@ -115,7 +115,10 @@ of the system prompt's working directory, else its basename; title from
 the first prompt, Claude account email, status, activity and cost),
 sorted with those needing an answer first, under a line giving the
 session count and that order; the header names the feed's connection
-state on every view. A session opens at `#s=<session_id>`. The first
+state on every view. A stream the browser gives up on (e.g. a 502 from
+`tailscale serve` while cc-proxy restarts) is reopened with backoff; once
+the token no longer works, the state becomes a reload link, which leads
+to the login form. A session opens at `#s=<session_id>`. The first
 request of a session also triggers a one-time, best-effort read of
 Claude Code's own local transcript
 (`<config dir>/projects/<encoded-cwd>/<session-id>.jsonl`, via
