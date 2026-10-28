@@ -525,7 +525,9 @@ let retryDelay = 2000;
 
 async function retryClosed() {
   setConnection("reconnecting");
-  const probe = { cache: "no-store", signal: AbortSignal.timeout?.(10000) };
+  const timeout = new AbortController();
+  setTimeout(() => timeout.abort(), 10000);
+  const probe = { cache: "no-store", signal: timeout.signal };
   const status = await fetch("push/key", probe).then(response => response.status, () => 0);
   if (status === 401) {
     setConnection("offline");
