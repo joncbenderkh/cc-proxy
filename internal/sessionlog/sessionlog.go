@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"github.com/joncbenderkh/cc-proxy/internal/transcript"
 )
@@ -34,16 +35,25 @@ type Session struct {
 const maxScan = 2000
 
 // DefaultDirs returns the projects directory of the default Claude Code
-// config directory, ~/.claude, or nothing when the home directory is
-// unknown. Running more than one Claude Code identity (each launched with
-// its own CLAUDE_CONFIG_DIR, such as CLAUDE_CONFIG_DIR=~/.claude-work)
-// means searching their projects directories too.
+// config directory, ~/.claude (left out when the home directory is
+// unknown), followed by that of $CLAUDE_CONFIG_DIR when it is set to
+// another directory, as Claude Code itself then reads it. Running more
+// than one Claude Code identity (each launched with its own
+// CLAUDE_CONFIG_DIR, such as CLAUDE_CONFIG_DIR=~/.claude-work) means
+// searching their projects directories too.
 func DefaultDirs() []string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil
+	var dirs []string
+	if home, err := os.UserHomeDir(); err == nil {
+		dirs = append(dirs, filepath.Join(home, ".claude", "projects"))
 	}
-	return []string{filepath.Join(home, ".claude", "projects")}
+	if configDir := os.Getenv("CLAUDE_CONFIG_DIR"); configDir != "" {
+		if abs, err := filepath.Abs(configDir); err == nil {
+			if projects := filepath.Join(abs, "projects"); !slices.Contains(dirs, projects) {
+				dirs = append(dirs, projects)
+			}
+		}
+	}
+	return dirs
 }
 
 // Find looks up the local transcript of sessionID across dirs, the

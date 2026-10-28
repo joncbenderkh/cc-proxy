@@ -5,6 +5,7 @@ package sessionlog
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -132,5 +133,31 @@ func TestFindFollowsSymlinkedProjects(t *testing.T) {
 
 	if _, ok := Find(dirs, "s1"); !ok {
 		t.Errorf("Find(%q) = false for a symlinked project directory, want true", "s1")
+	}
+}
+
+func TestDefaultDirs(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	work := t.TempDir()
+	t.Chdir(work)
+	claude := filepath.Join(home, ".claude", "projects")
+	for _, test := range []struct {
+		name, configDir string
+		want            []string
+	}{
+		{"unset", "", []string{claude}},
+		{"other directory", filepath.Join(work, "claude-work"), []string{claude, filepath.Join(work, "claude-work", "projects")}},
+		{"relative", "claude-work", []string{claude, filepath.Join(work, "claude-work", "projects")}},
+		{"default directory", filepath.Join(home, ".claude"), []string{claude}},
+		{"default directory, trailing slash", filepath.Join(home, ".claude") + string(filepath.Separator), []string{claude}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("CLAUDE_CONFIG_DIR", test.configDir)
+			if got := DefaultDirs(); !slices.Equal(got, test.want) {
+				t.Errorf("DefaultDirs() = %q, want %q", got, test.want)
+			}
+		})
 	}
 }

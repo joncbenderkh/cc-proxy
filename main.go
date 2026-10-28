@@ -123,7 +123,7 @@ func newRootCommand() *cobra.Command {
 	cmd.Flags().StringVar(&uiListen, "ui-listen", "", "serve the live feed web page on this loopback address (host:port); off when empty")
 	cmd.Flags().StringVar(&uiTokenFile, "ui-token-file", "", "file holding the web page login token, created if missing (default <user config dir>/cc-proxy/ui-token)")
 	cmd.Flags().StringVar(&historyFile, "history-file", "", `file keeping the feed's newest turns across restarts (default <user cache dir>/cc-proxy/turns.jsonl; "" turns it off)`)
-	cmd.Flags().StringArrayVar(&claudeConfigDirs, "claude-config-dir", nil, "additional Claude Code config directory to read session transcripts from, e.g. one set via CLAUDE_CONFIG_DIR for a second identity (~/.claude is always included); repeatable")
+	cmd.Flags().StringArrayVar(&claudeConfigDirs, "claude-config-dir", nil, "additional Claude Code config directory to read session transcripts from, e.g. one set via CLAUDE_CONFIG_DIR for a second identity (~/.claude, and $CLAUDE_CONFIG_DIR when set, are always included); repeatable")
 	cmd.Flags().StringVar(&upstreamURL, "upstream", "https://api.anthropic.com", "Anthropic API base URL (http or https)")
 	cmd.Flags().BoolVar(&logRequests, "log-requests", false, "log the headers and body of every request sent upstream (credentials redacted)")
 	cmd.Flags().BoolVar(&logResponses, "log-responses", false, "log the headers and body of every response relayed to the client")
@@ -325,14 +325,17 @@ func parseClaudeConfigDirs(values []string) ([]string, error) {
 }
 
 // sessionDirs lists where Claude Code's own session transcripts are
-// looked for: ~/.claude first, then the "projects" directory of each
-// --claude-config-dir, for users who run more than one Claude Code
-// identity (for example CLAUDE_CONFIG_DIR=~/.claude-work for a work
-// account) through the same proxy.
+// looked for: ~/.claude and $CLAUDE_CONFIG_DIR first, then the "projects"
+// directory of each --claude-config-dir, for users who run more than one
+// Claude Code identity (for example CLAUDE_CONFIG_DIR=~/.claude-work for
+// a work account) through the same proxy.
 func sessionDirs(configDirs []string) []string {
-	dirs := sessionlog.DefaultDirs()
+	candidates := sessionlog.DefaultDirs()
 	for _, dir := range configDirs {
-		projects := filepath.Join(dir, "projects")
+		candidates = append(candidates, filepath.Join(dir, "projects"))
+	}
+	var dirs []string
+	for _, projects := range candidates {
 		if !slices.ContainsFunc(dirs, func(seen string) bool { return sameDir(seen, projects) }) {
 			dirs = append(dirs, projects)
 		}

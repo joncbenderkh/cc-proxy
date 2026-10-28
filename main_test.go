@@ -136,6 +136,7 @@ func TestSessionDirs(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	work := t.TempDir()
 	if err := os.Mkdir(filepath.Join(work, "projects"), 0o700); err != nil {
 		t.Fatal(err)
@@ -146,6 +147,25 @@ func TestSessionDirs(t *testing.T) {
 	}
 	got := sessionDirs([]string{work, work, linked, filepath.Dir(sessionlog.DefaultDirs()[0])})
 	want := append(sessionlog.DefaultDirs(), filepath.Join(work, "projects"))
+	if !slices.Equal(got, want) {
+		t.Errorf("sessionDirs() = %q, want %q", got, want)
+	}
+}
+
+func TestSessionDirsConfigDirLinkedToDefault(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	if err := os.MkdirAll(filepath.Join(home, ".claude", "projects"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	linked := filepath.Join(t.TempDir(), "claude-link")
+	if err := os.Symlink(filepath.Join(home, ".claude"), linked); err != nil {
+		t.Skip("symlinks unavailable:", err)
+	}
+	t.Setenv("CLAUDE_CONFIG_DIR", linked)
+	got := sessionDirs(nil)
+	want := []string{filepath.Join(home, ".claude", "projects")}
 	if !slices.Equal(got, want) {
 		t.Errorf("sessionDirs() = %q, want %q", got, want)
 	}
