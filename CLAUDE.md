@@ -110,12 +110,11 @@ last 500 turns, which `--history-file` (default
 across restarts: turns are appended as JSON lines and the file is
 rewritten to the newest 500 once it holds 1000, and turn numbers continue
 where the last run stopped. The page opens on a gallery of session cards
-(labelled
-`<repo>:<branch>`, the repo name taken from the remote URL in the `.git`
-of the system prompt's working directory, as `owner/repo` when another
-session on that branch has a different remote of the same name, else the
-directory's basename; title from
-the first prompt, Claude account email, status, activity and cost),
+(labelled `<repo>:<branch>`, the repo name taken from the remote URL in
+the `.git` of the system prompt's working directory, as `owner/repo` when
+another session on that branch has a different remote of the same name,
+else the directory's basename; title from the first prompt, Claude
+account email, status, activity and cost),
 sorted with those needing an answer first, under a line giving the
 session count and that order; cards waiting on the viewer carry a Reply
 or Review request action. The header shows the feed's connection
@@ -153,8 +152,9 @@ which adds TLS.
 The UI server also answers Claude Code `PermissionRequest` HTTP hooks at
 `POST /hooks/permission-request` (bearer token required). The hook is
 held and the prompt appears in its session's view with Allow / Deny /
-Always allow (the suggested `addRules` allow entries only; a request from
-an unknown session stays on the gallery); `POST /approvals/{id}`
+Always allow (the suggested `addRules` allow entries only; a request
+without a session id stays on the gallery, and a session view links to
+requests of other sessions from the header); `POST /approvals/{id}`
 records the answer. Claude Code shows its terminal dialog at the same
 time, and the first answer wins. Claude Code keeps the hook request open
 after a terminal answer, so the proxy watches each `/v1/messages` request
@@ -185,9 +185,9 @@ and exits 2, which wakes Claude with it as a system reminder; it exits 0
 when the session stops again (the newer wait replaces the older one) or
 the server shuts down. While a session waits, its view shows a banner
 and a prompt box pinned to the bottom of the screen, quoting the end of
-Claude's last reply; the box is disabled while the feed is not live. Prompt log records carry the prompt size, never
-its text. The command reads the token file itself, so no environment
-variable is needed:
+Claude's last reply; the box is disabled while the feed is not live.
+Prompt log records carry the prompt size, never its text. The command
+reads the token file itself, so no environment variable is needed:
 
 ```json
 {"hooks": {"Stop": [{"hooks": [{
