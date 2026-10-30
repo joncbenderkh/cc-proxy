@@ -14,6 +14,7 @@
   --muted: oklch(51.55% .010 85); --border: oklch(90.62% .009 85);
   --accent: oklch(54.74% .133 43); --ok: #2e7d4f; --bad: #b3261e;
   --tint: oklch(96% .022 55); --code: oklch(96% .004 88);
+  --edge: oklch(78.06% .052 70); --edge-strong: oklch(74.47% .065 66);
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 @media (prefers-color-scheme: dark) {
@@ -21,12 +22,13 @@
     --bg: #161514; --surface: #1f1e1c; --fg: #ecebe8; --muted: #9c998f;
     --border: oklch(32% .009 85); --accent: #e08a5f; --ok: #6cc28f; --bad: #f2877e;
     --tint: oklch(27% .025 55); --code: oklch(23% .004 88);
+    --edge: oklch(45.81% .048 72); --edge-strong: oklch(49.75% .059 68);
   }
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 body {
-  margin: 0; background: var(--bg); color: var(--fg);
+  margin: 0; min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; background: var(--bg); color: var(--fg);
   font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
 }
 p, h1, h2, h3 { margin: 0; }
@@ -53,12 +55,19 @@ header {
 }
 h1 { font-size: 18px; font-weight: 700; letter-spacing: -.7px; }
 .header-end { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--muted); }
+h1, #total { white-space: nowrap; }
 #total { font-variant-numeric: tabular-nums; }
+@media (max-width: 420px) { #elsewhere:not([hidden]) ~ #total { display: none; } }
+.header-end { min-width: 0; }
+#elsewhere {
+  display: block; min-width: 0; line-height: 44px; margin: -12px 0;
+  color: var(--accent); font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 #dot { width: 7px; height: 7px; border-radius: 50%; background: var(--bad); flex: none; }
 #dot.live { background: var(--ok); }
 #connection { white-space: nowrap; }
 #connection a { color: var(--bad); }
-main { padding: 23px 16px 24px; }
+main { flex: 1; padding: 23px 16px 24px; }
 @media (min-width: 800px) { main { padding: 28px 28px 24px; } }
 
 /* Gallery */
@@ -71,7 +80,7 @@ h2 { font-size: 21px; letter-spacing: -.65px; }
   display: flex; flex-direction: column; min-width: 0; padding: 15px; text-decoration: none;
   background: var(--surface); border: 1px solid var(--border); border-radius: 9px;
 }
-.session.attention { background: var(--tint); border-color: color-mix(in oklch, var(--accent) 45%, var(--border)); }
+.session.attention { background: var(--tint); border-color: var(--edge-strong); }
 .card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 6px; }
 .card-label { font: 600 13px/1.5 var(--mono); overflow-wrap: anywhere; padding-right: 8px; }
 .chevron { color: var(--muted); font-size: 19px; line-height: 20px; }
@@ -87,7 +96,7 @@ h2 { font-size: 21px; letter-spacing: -.65px; }
   border: 1px solid var(--border); padding: 3px 6px; border-radius: 4px; color: var(--fg); background: var(--bg);
 }
 .attention .badge, .badge.attention {
-  color: var(--accent); border-color: color-mix(in oklch, var(--accent) 30%, var(--border)); background: var(--surface);
+  color: var(--accent); border-color: var(--edge); background: var(--surface);
 }
 .working-dot { height: 5px; width: 5px; border-radius: 50%; background: var(--ok); }
 @media (prefers-reduced-motion: no-preference) {
@@ -101,7 +110,7 @@ h2 { font-size: 21px; letter-spacing: -.65px; }
 .card-foot { margin-top: 8px; font-size: 10px; color: var(--muted); }
 .card-action {
   display: flex; align-items: center; justify-content: center; min-height: 44px; margin-top: 13px;
-  border: 1px solid color-mix(in oklch, var(--accent) 35%, var(--border)); border-radius: 6px;
+  border: 1px solid var(--edge); border-radius: 6px;
   background: var(--surface); font-size: 13px; font-weight: 650;
 }
 .empty { padding: 70px 16px; text-align: center; }
@@ -147,7 +156,7 @@ details pre { border-radius: 0; border-top: 1px solid var(--border); }
 .metrics strong { font-weight: 550; font-size: 11px; color: var(--fg); }
 .notice { font-size: 11px; line-height: 1.6; color: var(--muted); padding: 10px 0; }
 .approval {
-  padding: 15px; background: var(--tint); border: 1px solid color-mix(in oklch, var(--accent) 40%, var(--border));
+  padding: 15px; background: var(--tint); border: 1px solid var(--edge-strong);
   border-radius: 9px; margin: 20px 0; overflow-wrap: anywhere;
 }
 .approval h3 { font-size: 14px; margin-bottom: 7px; }
@@ -156,7 +165,7 @@ details pre { border-radius: 0; border-top: 1px solid var(--border); }
 .approval .always { grid-column: 1 / -1; background: transparent; }
 .terminal-note { font-size: 10px; color: var(--muted); margin-top: 12px; }
 .err { color: var(--bad); font-size: 11px; line-height: 1.5; }
-#dock { position: sticky; bottom: 0; z-index: 1; max-width: 952px; margin: 0 auto; }
+#dock { position: sticky; bottom: 0; z-index: 1; width: 100%; max-width: 952px; margin: 0 auto; }
 #composer, .working {
   background: var(--surface); border-top: 1px solid var(--border);
   padding: 12px 16px max(12px, env(safe-area-inset-bottom));
@@ -180,6 +189,7 @@ details pre { border-radius: 0; border-top: 1px solid var(--border); }
 <header>
   <h1>cc-proxy</h1>
   <div class="header-end">
+    <a id="elsewhere" hidden></a>
     <span id="total"></span>
     <span id="dot" title="connecting" aria-hidden="true"></span>
     <span id="connection" role="status">connecting</span>
@@ -197,8 +207,8 @@ details pre { border-radius: 0; border-top: 1px solid var(--border); }
       <h3>No sessions yet</h3>
       <p>Start Claude Code through cc-proxy. Your sessions appear here automatically.</p>
     </div>
-    <nav id="sessions" aria-label="Sessions"></nav>
     <section id="orphans" aria-live="assertive"></section>
+    <nav id="sessions" aria-label="Sessions"></nav>
   </section>
   <section id="session" hidden>
     <div class="session-heading">
@@ -246,11 +256,13 @@ const FOLD = 600;
 // Long sessions show their latest turns; the rest open on request.
 const RECENT = 30;
 const seenApprovals = new Set();
-const drafts = new Map();
+// Each session keeps its own draft, sending flag and last failure, so a
+// reply that lands after the viewer moved on updates the right session.
+const prompts = new Map();
+const approvalCards = new Map();
 let pending = [];
 let idle = [];
 let connectionState = "connecting";
-let sending = false;
 let showAll = "";
 let galleryScroll = 0;
 let focusOnOpen = false;
@@ -437,7 +449,10 @@ function renderSession(session) {
   card.append(line, meta, el("div", "card-foot mono", "session " + session.id.slice(0, 8)));
   if (waitingFor(session.id)) {
     card.append(el("span", "card-action", "Reply →"));
-    card.onclick = () => { focusOnOpen = true; };
+    card.onclick = event => {
+      // A modified click opens another tab and no hashchange follows here.
+      if (event.button === 0 && !event.ctrlKey && !event.metaKey && !event.shiftKey) focusOnOpen = true;
+    };
   } else if (pending.some(request => request.session_id === session.id)) {
     card.append(el("span", "card-action", "Review request →"));
   }
@@ -455,9 +470,13 @@ function showSessions() {
   $("empty").hidden = all.length > 0;
 }
 
-function showSession(id) {
+function sessionTurns(id) {
+  return turns.filter(turn => turn.session_id === id);
+}
+
+function showSessionHeader(id) {
   const session = sessions.get(id);
-  const shown = turns.filter(turn => turn.session_id === id);
+  const shown = sessionTurns(id);
   $("session-name").textContent = session ? project(session) : "Session " + id.slice(0, 8);
   $("session-sub").textContent = ["session " + id.slice(0, 8), shown.length + (shown.length === 1 ? " turn" : " turns"),
     session && session.cost ? usd(session.cost) + " spent" : ""].filter(Boolean).join(" · ");
@@ -471,16 +490,46 @@ function showSession(id) {
     if (session.model) line.append("model " + shortModel(session.model));
     info.append(line);
   }
+}
+
+// showTimeline rebuilds the session's turns; new turns are appended
+// instead, so open disclosures stay open.
+function historyButton(id, count) {
+  const older = el("button", "history", "Show " + count + (count === 1 ? " earlier turn" : " earlier turns"));
+  older.type = "button";
+  older.onclick = () => { showAll = id; redraw(); };
+  return older;
+}
+
+// appendTurn adds a live turn to the open timeline, keeping the window of
+// the latest turns unless the viewer asked for all of them.
+function appendTurn(id, turn) {
+  const count = sessionTurns(id).length;
+  list.append(render(turn, count));
+  const shown = list.querySelectorAll(".turn");
+  if (showAll === id || shown.length <= RECENT) return;
+  // Keep the text being read in place where the browser does not anchor
+  // the scroll position itself (Safari).
+  const top = shown[1].getBoundingClientRect().top;
+  shown[0].remove();
+  const button = historyButton(id, count - RECENT);
+  const old = list.querySelector(".history");
+  if (old) old.replaceWith(button);
+  else list.prepend(button);
+  window.scrollBy(0, shown[1].getBoundingClientRect().top - top);
+}
+
+function showTimeline(id) {
+  const shown = sessionTurns(id);
   const nodes = [];
   const first = showAll === id ? 0 : Math.max(0, shown.length - RECENT);
-  if (first) {
-    const older = el("button", "history", "Show " + first + " earlier turns");
-    older.type = "button";
-    older.onclick = () => { showAll = id; redraw(); };
-    nodes.push(older);
-  }
+  if (first) nodes.push(historyButton(id, first));
   for (let i = first; i < shown.length; i++) nodes.push(render(shown[i], i + 1));
-  if (!shown.length) {
+  if (backlog) {
+    nodes.push(el("p", "notice", "Loading…"));
+  } else if (!shown.length && connectionState !== "live") {
+    nodes.push(el("p", "notice", "Not connected yet."));
+  } else if (!shown.length) {
     const empty = el("div", "empty");
     empty.append(el("h3", "", "No turns yet"), el("p", "", "This session is connected, but no exchange has been recorded yet."));
     nodes.push(empty);
@@ -488,16 +537,34 @@ function showSession(id) {
   list.replaceChildren(...nodes);
 }
 
+// refresh updates the totals, the gallery or the open session's heading,
+// and the dock, leaving the timeline and the approval cards alone.
+function refresh() {
+  const id = selectedSession();
+  const all = [...sessions.values()];
+  total.textContent = all.length ? usd(all.reduce((sum, session) => sum + session.cost, 0)) + " total" : "";
+  if (id) showSessionHeader(id);
+  else showSessions();
+  // In a session view, approvals of other sessions show only as this link.
+  const elsewhere = id ? pending.filter(request => request.session_id !== id) : [];
+  const link = $("elsewhere");
+  link.hidden = !elsewhere.length;
+  if (elsewhere.length) {
+    link.textContent = elsewhere.length === 1 ? "1 request elsewhere" : elsewhere.length + " requests elsewhere";
+    // A request from an unknown session is shown on the gallery.
+    const target = elsewhere[0].session_id;
+    link.href = sessions.has(target) ? "#s=" + encodeURIComponent(target) : "#";
+  }
+  showDock();
+}
+
 function redraw() {
   const id = selectedSession();
   gallery.hidden = !!id;
   sessionView.hidden = !id;
-  const all = [...sessions.values()];
-  total.textContent = all.length ? usd(all.reduce((sum, session) => sum + session.cost, 0)) + " total" : "";
-  if (id) showSession(id);
-  else showSessions();
+  if (id) showTimeline(id);
   showApprovals();
-  showDock();
+  refresh();
 }
 
 // lastReply is the end of Claude's last message in the session, quoted
@@ -506,9 +573,14 @@ function lastReply(id) {
   for (let i = turns.length - 1; i >= 0; i--) {
     if (turns[i].session_id !== id) continue;
     const texts = (turns[i].reply || []).filter(block => block.type === "text" && block.text.trim());
-    if (texts.length) return texts.at(-1).text.trim().split(/(?<=[.!?])\s+/).at(-1);
+    if (texts.length) return texts.at(-1).text.trim().split(/[.!?]\s+/).at(-1);
   }
   return "";
+}
+
+function promptState(id) {
+  if (!prompts.has(id)) prompts.set(id, { text: "", sending: false, error: "", wait: "" });
+  return prompts.get(id);
 }
 
 let dockSession = "";
@@ -518,10 +590,10 @@ function showDock() {
   const session = sessions.get(id);
   const waiting = id ? waitingFor(id) : undefined;
   const working = !waiting && session && status(session).kind === "working";
+  const state = promptState(id);
   if (id !== dockSession) {
     dockSession = id;
-    promptBox.value = drafts.get(id) || "";
-    feedback.textContent = "";
+    promptBox.value = state.text;
   }
   dock.hidden = !waiting && !working;
   composer.hidden = !waiting;
@@ -529,20 +601,23 @@ function showDock() {
   $("waiting").hidden = !waiting;
   $("session-note").hidden = !session || !!waiting || status(session).label !== "Idle";
   if (!waiting) return;
+  // An error belongs to the wait it happened in.
+  if (state.wait !== waiting.time) {
+    state.wait = waiting.time;
+    state.error = "";
+  }
   const reply = lastReply(id);
   $("last-reply").textContent = reply ? "Claude: " + reply : "";
   $("last-reply").hidden = !reply;
   const live = connectionState === "live";
   promptBox.disabled = !live;
-  promptBox.readOnly = sending;
-  composer.setAttribute("aria-busy", String(sending));
-  sendButton.disabled = !live || sending || !promptBox.value.trim();
-  sendButton.textContent = sending ? "Sending…" : "Send prompt ↑";
-  if (!live && !feedback.dataset.failure) {
-    feedback.textContent = connectionState === "offline" ? "Offline. Reload to sign in again before sending." : "Reconnecting. You can send once the feed is live.";
-  } else if (live && !feedback.dataset.failure) {
-    feedback.textContent = "";
-  }
+  promptBox.readOnly = state.sending;
+  composer.setAttribute("aria-busy", String(state.sending));
+  sendButton.disabled = !live || state.sending || !state.text.trim();
+  sendButton.textContent = state.sending ? "Sending…" : "Send prompt ↑";
+  feedback.textContent = state.error ? "Not sent: " + state.error
+    : connectionState === "offline" ? "Offline. Reload to sign in again before sending."
+    : !live ? "Reconnecting. You can send once the feed is live." : "";
 }
 
 function focusComposer() {
@@ -552,23 +627,26 @@ function focusComposer() {
 async function sendPrompt(event) {
   event.preventDefault();
   const session = selectedSession();
-  sending = true;
-  delete feedback.dataset.failure;
+  const state = promptState(session);
+  // Ctrl+Enter submits even while the button is disabled.
+  const waiting = waitingFor(session);
+  if (state.sending || !state.text.trim() || connectionState !== "live" || !waiting) return;
+  state.sending = true;
+  state.error = "";
   showDock();
   try {
     const response = await fetch("prompts/" + encodeURIComponent(session), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt: promptBox.value }),
+      body: JSON.stringify({ prompt: state.text }),
     });
     if (!response.ok) throw new Error((await response.text()).trim() || "HTTP " + response.status);
-    promptBox.value = "";
-    drafts.delete(session);
+    state.text = "";
+    if (selectedSession() === session) promptBox.value = "";
   } catch (failure) {
-    feedback.dataset.failure = "1";
-    feedback.textContent = "Not sent: " + failure.message;
+    if (waitingFor(session)?.time === waiting.time) state.error = failure.message;
   } finally {
-    sending = false;
+    state.sending = false;
     showDock();
   }
 }
@@ -617,12 +695,17 @@ async function decide(card, id, behavior, always) {
   }
 }
 
+// approvalCard reuses a request's card while it is pending, so a click in
+// flight keeps its disabled buttons and its error line.
+function approvalCard(request) {
+  if (!approvalCards.has(request.id)) approvalCards.set(request.id, renderApproval(request));
+  return approvalCards.get(request.id);
+}
+
 function renderApproval(request) {
   const card = el("article", "approval");
   card.append(el("h3", "", "Approval needed"));
   const sub = [new Date(request.time).toLocaleTimeString()];
-  const session = sessions.get(request.session_id);
-  if (!selectedSession()) sub.push(session ? project(session) : (request.session_id || "").slice(0, 8));
   if (request.cwd) sub.push(request.cwd);
   card.append(el("div", "sub", sub.filter(Boolean).join(" · ")));
   const tool = el("pre");
@@ -649,8 +732,10 @@ function renderApproval(request) {
 // session is unknown stay on the gallery.
 function showApprovals() {
   const id = selectedSession();
-  approvals.replaceChildren(...pending.filter(request => id && request.session_id === id).map(renderApproval));
-  orphans.replaceChildren(...pending.filter(request => !sessions.has(request.session_id)).map(renderApproval));
+  const ids = new Set(pending.map(request => request.id));
+  for (const key of approvalCards.keys()) if (!ids.has(key)) approvalCards.delete(key);
+  approvals.replaceChildren(...pending.filter(request => id && request.session_id === id).map(approvalCard));
+  orphans.replaceChildren(...pending.filter(request => !sessions.has(request.session_id)).map(approvalCard));
   document.title = pending.length ? "(" + pending.length + ") cc-proxy" : "cc-proxy feed";
   const fresh = pending.filter(request => !seenApprovals.has(request.id));
   if (fresh.length) {
@@ -720,17 +805,19 @@ setUpNotifications().catch(() => {});
 let shownSession = selectedSession();
 window.addEventListener("hashchange", () => {
   if (!shownSession) galleryScroll = window.scrollY;
+  if (selectedSession() !== shownSession) showAll = "";
   shownSession = selectedSession();
   redraw();
   window.scrollTo(0, shownSession ? document.body.scrollHeight : galleryScroll);
   if (focusOnOpen) focusComposer();
   focusOnOpen = false;
 });
-setInterval(() => { if (!selectedSession()) showSessions(); }, 30000);
+setInterval(refresh, 30000);
 composer.addEventListener("submit", sendPrompt);
 promptBox.addEventListener("input", () => {
-  drafts.set(selectedSession(), promptBox.value);
-  delete feedback.dataset.failure;
+  const state = promptState(selectedSession());
+  state.text = promptBox.value;
+  state.error = "";
   showDock();
 });
 $("focus-composer").addEventListener("click", event => {
@@ -738,7 +825,7 @@ $("focus-composer").addEventListener("click", event => {
   focusComposer();
 });
 promptBox.addEventListener("keydown", event => {
-  if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) composer.requestSubmit();
+  if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) sendPrompt(event);
 });
 
 const nearBottom = () => window.innerHeight + window.scrollY >= document.body.scrollHeight - 80;
@@ -771,12 +858,21 @@ function setConnection(state) {
 // is not rebuilt. The login probe can use any guarded path: the auth guard
 // answers 401 before push/key's own handler runs.
 let events;
+// A stream starts with a backlog of turns, then the states; the open
+// timeline is built once the backlog is in.
+let backlog = true;
 let retryDelay = 2000;
 // The scroll position to restore once a replay ends, or null.
 let replayScroll = null;
 
 async function retryClosed() {
   setConnection("reconnecting");
+  // A closed stream sends no more backlog.
+  if (backlog) {
+    backlog = false;
+    const id = selectedSession();
+    if (id) showTimeline(id);
+  }
   const timeout = new AbortController();
   setTimeout(() => timeout.abort(), 10000);
   const probe = { cache: "no-store", signal: timeout.signal };
@@ -789,7 +885,10 @@ async function retryClosed() {
   retryDelay = Math.min(retryDelay * 2, 30000);
 }
 
+// A stream the browser resumes by itself sends only the turns after the
+// last one seen, so only a new stream starts a backlog.
 function connect(replay) {
+  backlog = true;
   events = new EventSource("events");
   events.onopen = () => {
     if (replay) {
@@ -812,15 +911,21 @@ function connect(replay) {
   events.addEventListener("approvals", event => {
     pending = JSON.parse(event.data);
     pending.forEach(request => track(request, false));
-    redraw();
+    showApprovals();
+    refresh();
   });
   events.addEventListener("idle", event => {
     idle = JSON.parse(event.data);
     idle.forEach(entry => track(entry, false));
-    redraw();
-    // The states follow the turns, and idle sorts last, so it ends a replay.
-    if (replayScroll !== null) {
-      window.scrollTo(0, replayScroll);
+    refresh();
+    // The states follow the turns, and idle sorts last, so it ends the
+    // backlog.
+    if (backlog) {
+      backlog = false;
+      const id = selectedSession();
+      if (id) showTimeline(id);
+      if (replayScroll !== null) window.scrollTo(0, replayScroll);
+      else if (id) window.scrollTo(0, document.body.scrollHeight);
       replayScroll = null;
     }
   });
@@ -828,14 +933,23 @@ function connect(replay) {
     const turn = JSON.parse(event.data);
     if (turn.backfill) {
       track(turn, false);
-      if (!selectedSession()) showSessions();
+      refresh();
       return;
     }
-    const follow = replayScroll === null && nearBottom();
     turns.push(turn);
     track(turn, true);
-    redraw();
-    if (follow && selectedSession()) window.scrollTo(0, document.body.scrollHeight);
+    if (backlog) {
+      refresh();
+      return;
+    }
+    const follow = nearBottom();
+    const id = selectedSession();
+    if (id === turn.session_id) {
+      if (list.querySelector(".turn")) appendTurn(id, turn);
+      else showTimeline(id);
+    }
+    refresh();
+    if (follow && id) window.scrollTo(0, document.body.scrollHeight);
   });
 }
 
