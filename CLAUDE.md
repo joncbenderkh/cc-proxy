@@ -109,19 +109,22 @@ last 500 turns, which `--history-file` (default
 `<user cache dir>/cc-proxy/turns.jsonl`, 0600; `""` turns it off) keeps
 across restarts: turns are appended as JSON lines and the file is
 rewritten to the newest 500 once it holds 1000, and turn numbers continue
-where the last run stopped. The page opens on a list of sessions (labelled
-`<repo>:<branch>`, the repo name taken from the remote URL in the `.git`
-of the system prompt's working directory, as `owner/repo` when another
-session on that branch has a different remote of the same name, else the
-directory's basename; title from
-the first prompt, Claude account email, status, activity and cost),
+where the last run stopped. The page opens on a gallery of session cards
+(labelled `<repo>:<branch>`, the repo name taken from the remote URL in
+the `.git` of the system prompt's working directory, as `owner/repo` when
+another session on that branch has a different remote of the same name,
+else the directory's basename; title from the first prompt, Claude
+account email, status, activity and cost),
 sorted with those needing an answer first, under a line giving the
-session count and that order; the header shows the feed's connection
+session count and that order; cards waiting on the viewer carry a Reply
+or Review request action. The header shows the feed's connection
 state on every view, as a green dot while live and in words otherwise.
 A stream the browser gives up on (e.g. a 502 from `tailscale serve`
 while cc-proxy restarts) is reopened with backoff; once the token no
 longer works, the state becomes a reload link, which leads to the login
-form. A session opens at `#s=<session_id>`. The first
+form. A session opens at `#s=<session_id>` with its latest 30 turns
+(older ones on request); going back restores the gallery's scroll
+position. The first
 request of a session also triggers a one-time, best-effort read of
 Claude Code's own local transcript
 (`<config dir>/projects/<encoded-cwd>/<session-id>.jsonl`, via
@@ -148,8 +151,10 @@ which adds TLS.
 
 The UI server also answers Claude Code `PermissionRequest` HTTP hooks at
 `POST /hooks/permission-request` (bearer token required). The hook is
-held and the prompt appears on the page with Allow / Deny / Always allow
-(the suggested `addRules` allow entries only); `POST /approvals/{id}`
+held and the prompt appears in its session's view with Allow / Deny /
+Always allow (the suggested `addRules` allow entries only; a request
+without a session id stays on the gallery, and a session view links to
+requests of other sessions from the header); `POST /approvals/{id}`
 records the answer. Claude Code shows its terminal dialog at the same
 time, and the first answer wins. Claude Code keeps the hook request open
 after a terminal answer, so the proxy watches each `/v1/messages` request
@@ -178,10 +183,11 @@ so the terminal stays usable, and posts the hook input to
 `POST /prompts/{session_id}`. The command then writes the prompt to stderr
 and exits 2, which wakes Claude with it as a system reminder; it exits 0
 when the session stops again (the newer wait replaces the older one) or
-the server shuts down. The page shows a prompt box for the selected
-session while it waits. Prompt log records carry the prompt size, never
-its text. The command reads the token file itself, so no environment
-variable is needed:
+the server shuts down. While a session waits, its view shows a banner
+and a prompt box pinned to the bottom of the screen, quoting the end of
+Claude's last reply; the box is disabled while the feed is not live.
+Prompt log records carry the prompt size, never its text. The command
+reads the token file itself, so no environment variable is needed:
 
 ```json
 {"hooks": {"Stop": [{"hooks": [{

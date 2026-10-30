@@ -10,152 +10,262 @@
 <title>cc-proxy feed</title>
 <style>
 :root {
-  --bg: #f6f5f2; --surface: #ffffff; --text: #1d1c1a; --muted: #6b6862;
-  --border: #e3e0da; --user: #eef3fb; --tool: #f3f1ec; --accent: #b4552d;
-  --ok: #2e7d4f; --bad: #b3261e;
+  --bg: oklch(97.02% .004 88); --surface: #ffffff; --fg: oklch(22.65% .004 80);
+  --muted: oklch(51.55% .010 85); --border: oklch(90.62% .009 85);
+  --accent: oklch(54.74% .133 43); --ok: #2e7d4f; --bad: #b3261e;
+  --tint: oklch(96% .022 55); --code: oklch(96% .004 88);
+  --edge: oklch(78.06% .052 70); --edge-strong: oklch(74.47% .065 66);
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #161514; --surface: #1f1e1c; --text: #ecebe8; --muted: #9c998f;
-    --border: #34322e; --user: #1f2a3a; --tool: #2a2825; --accent: #e08a5f;
-    --ok: #6cc28f; --bad: #f2877e;
+    --bg: #161514; --surface: #1f1e1c; --fg: #ecebe8; --muted: #9c998f;
+    --border: oklch(32% .009 85); --accent: #e08a5f; --ok: #6cc28f; --bad: #f2877e;
+    --tint: oklch(27% .025 55); --code: oklch(23% .004 88);
+    --edge: oklch(45.81% .048 72); --edge-strong: oklch(49.75% .059 68);
   }
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body {
-  margin: 0; background: var(--bg); color: var(--text);
-  font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  margin: 0; min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; background: var(--bg); color: var(--fg);
+  font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
 }
-header {
-  position: sticky; top: 0; z-index: 1; background: var(--bg);
-  border-bottom: 1px solid var(--border);
-  padding: calc(8px + env(safe-area-inset-top)) 16px 8px;
-  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+p, h1, h2, h3 { margin: 0; }
+a { color: inherit; }
+button, textarea { font: inherit; }
+button, a, textarea { -webkit-tap-highlight-color: transparent; }
+button, a { touch-action: manipulation; }
+button {
+  cursor: pointer; color: var(--fg); background: var(--surface); border: 1px solid var(--border);
+  border-radius: 7px; min-height: 44px; padding: 9px 13px; font-weight: 550;
 }
-h1 { font-size: 16px; margin: 0; }
-#dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bad); }
-#dot.live { background: var(--ok); }
-#connection { color: var(--muted); font-size: 13px; white-space: nowrap; }
-#connection a { color: var(--accent); }
-#back { color: var(--accent); text-decoration: none; font-size: 22px; line-height: 1; padding: 0 4px; }
-#heading { flex: 1 1 0; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#total { color: var(--muted); font-variant-numeric: tabular-nums; }
-#notify {
-  font: inherit; font-size: 13px; color: var(--accent); background: none;
-  border: 1px solid var(--accent); border-radius: 999px; padding: 2px 10px;
-}
-.session {
-  display: block; color: inherit; text-decoration: none;
-  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
-  padding: 10px 12px; margin-bottom: 10px;
-}
-.session.attention { border-color: var(--accent); }
-.session .top { display: flex; gap: 8px; align-items: baseline; }
-.session .project { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.session .title {
-  margin: 2px 0 4px; overflow: hidden; overflow-wrap: anywhere;
-  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
-}
-.session .title.none { color: var(--muted); font-style: italic; }
-.badge {
-  flex: none; font-size: 12px; border-radius: 999px; padding: 1px 8px;
-  border: 1px solid var(--border); color: var(--muted);
-}
-.badge.attention { background: var(--accent); border-color: var(--accent); color: #fff; }
-.badge.working { color: var(--ok); border-color: var(--ok); }
-main { max-width: 760px; margin: 0 auto; padding: 12px 16px 48px; }
-.turn {
-  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
-  padding: 10px 12px; margin-bottom: 12px; overflow-wrap: anywhere;
-}
-.meta { color: var(--muted); font-size: 12px; display: flex; flex-wrap: wrap; gap: 4px 10px; }
-.meta .err { color: var(--bad); font-weight: 600; }
-.block { margin-top: 8px; white-space: pre-wrap; }
-.user { background: var(--user); border-radius: 8px; padding: 6px 8px; }
-.tool, .result {
-  background: var(--tool); border-radius: 8px; padding: 6px 8px;
-  font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
-}
-.tool b { color: var(--accent); }
-.result.error { border-left: 3px solid var(--bad); }
-details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
-#empty { color: var(--muted); text-align: center; margin-top: 40px; }
-#overview { margin: 0 0 10px; align-items: center; }
-#notify { margin-left: auto; }
-#overview[hidden] { display: none; }
+button.primary { background: var(--fg); color: var(--surface); border-color: var(--fg); }
+button.danger { color: var(--bad); }
+button:disabled { opacity: .5; cursor: default; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.mono { font-family: var(--mono); }
 .screen-reader-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-#dock { position: sticky; bottom: 0; padding-bottom: env(safe-area-inset-bottom); }
+
+header {
+  position: sticky; top: 0; z-index: 2; background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: calc(12px + env(safe-area-inset-top)) 16px 12px;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+}
+h1 { font-size: 18px; font-weight: 700; letter-spacing: -.7px; }
+.header-end { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--muted); }
+h1, #total { white-space: nowrap; }
+#total { font-variant-numeric: tabular-nums; }
+@media (max-width: 420px) { #elsewhere:not([hidden]) ~ #total { display: none; } }
+.header-end { min-width: 0; }
+#elsewhere {
+  display: block; min-width: 0; line-height: 44px; margin: -12px 0;
+  color: var(--accent); font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#dot { width: 7px; height: 7px; border-radius: 50%; background: var(--bad); flex: none; }
+#dot.live { background: var(--ok); }
+#connection { white-space: nowrap; }
+#connection a { color: var(--bad); }
+main { flex: 1; padding: 23px 16px 24px; }
+@media (min-width: 800px) { main { padding: 28px 28px 24px; } }
+
+/* Gallery */
+.section-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 8px; }
+h2 { font-size: 21px; letter-spacing: -.65px; }
+#notify { font-size: 12px; min-height: 38px; padding: 7px 10px; background: transparent; }
+#overview-text { font-size: 12px; color: var(--muted); margin-bottom: 20px; line-height: 1.6; }
+#sessions { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); gap: 14px; }
+.session {
+  display: flex; flex-direction: column; min-width: 0; padding: 15px; text-decoration: none;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 9px;
+}
+.session.attention { background: var(--tint); border-color: var(--edge-strong); }
+.card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 6px; }
+.card-label { font: 600 13px/1.5 var(--mono); overflow-wrap: anywhere; padding-right: 8px; }
+.chevron { color: var(--muted); font-size: 19px; line-height: 20px; }
+.card-title {
+  font-size: 14px; line-height: 1.5; margin-top: 7px; font-weight: 550; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden;
+}
+.card-title.none { color: var(--muted); font-weight: 400; font-style: italic; }
+.account { font-size: 11px; color: var(--muted); margin-top: 6px; overflow-wrap: anywhere; }
+.status-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 13px 0 14px; font-size: 11px; color: var(--muted); }
+.badge {
+  display: inline-flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 650;
+  border: 1px solid var(--border); padding: 3px 6px; border-radius: 4px; color: var(--fg); background: var(--bg);
+}
+.attention .badge, .badge.attention {
+  color: var(--accent); border-color: var(--edge); background: var(--surface);
+}
+.working-dot { height: 5px; width: 5px; border-radius: 50%; background: var(--ok); }
+@media (prefers-reduced-motion: no-preference) {
+  .working-dot { animation: pulse 2s infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+}
+.card-meta {
+  margin-top: auto; padding-top: 12px; border-top: 1px solid var(--border);
+  font-size: 10px; color: var(--muted); display: flex; gap: 5px 13px; flex-wrap: wrap;
+}
+.card-foot { margin-top: 8px; font-size: 10px; color: var(--muted); }
+.card-action {
+  display: flex; align-items: center; justify-content: center; min-height: 44px; margin-top: 13px;
+  border: 1px solid var(--edge); border-radius: 6px;
+  background: var(--surface); font-size: 13px; font-weight: 650;
+}
+.empty { padding: 70px 16px; text-align: center; }
+.empty-mark { font: 24px var(--mono); color: var(--muted); margin-bottom: 18px; }
+.empty h3 { font-size: 16px; margin-bottom: 10px; }
+.empty p { font-size: 12px; line-height: 1.8; color: var(--muted); max-width: 270px; margin: auto; }
+
+/* Session */
+#session { max-width: 920px; margin: 0 auto; }
+.session-heading { display: flex; gap: 7px; align-items: flex-start; margin-bottom: 10px; min-width: 0; }
+.session-heading > div { min-width: 0; }
+#back { display: flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; margin: -8px 0 0 -12px; font-size: 22px; text-decoration: none; }
+#session-name { font: 650 16px/1.5 var(--mono); overflow-wrap: anywhere; }
+.sub { font-size: 11px; line-height: 1.6; color: var(--muted); }
+.waiting-banner {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px;
+  padding: 6px 12px; background: var(--tint); border: 1px solid var(--border); border-radius: 6px;
+  margin: 12px 0; font-size: 12px; font-weight: 600;
+}
+.waiting-banner a { display: inline-flex; align-items: center; min-height: 44px; }
+.session-info { padding-bottom: 18px; border-bottom: 1px solid var(--border); font-size: 11px; color: var(--muted); line-height: 1.8; }
+.session-info .status-line { margin: 7px 0 0; }
+#turns { margin-top: 22px; }
+.history { width: 100%; margin: 0 0 20px; font-size: 12px; background: transparent; }
+.turn { padding-bottom: 24px; margin-bottom: 22px; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+.turn-top { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 10px; margin-bottom: 12px; }
+.turn-top .err { color: var(--bad); font-weight: 650; }
+.role { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin: 12px 0 7px; }
+.role:first-child { margin-top: 0; }
+.prompt-text { font-size: 14px; line-height: 1.6; white-space: pre-wrap; }
+.reply { font-size: 13px; line-height: 1.7; white-space: pre-wrap; }
+details { margin: 12px 0; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); font-size: 11px; }
+summary { padding: 12px; cursor: pointer; min-height: 44px; line-height: 1.5; overflow-wrap: anywhere; }
+.summary-input { color: var(--muted); font-weight: 400; margin-left: 5px; }
+details.error { border-left: 3px solid var(--bad); }
+pre {
+  white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.6 var(--mono);
+  background: var(--code); padding: 12px; margin: 0; border-radius: 5px;
+}
+details pre { border-radius: 0; border-top: 1px solid var(--border); }
+.metrics { padding: 0 12px 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 9px; font-size: 10px; color: var(--muted); }
+.metrics div { display: flex; flex-direction: column; gap: 3px; }
+.metrics strong { font-weight: 550; font-size: 11px; color: var(--fg); }
+.notice { font-size: 11px; line-height: 1.6; color: var(--muted); padding: 10px 0; }
 .approval {
-  background: var(--surface); border: 2px solid var(--accent); border-radius: 10px;
-  padding: 10px 12px; margin-top: 12px; overflow-wrap: anywhere;
-  box-shadow: 0 -4px 16px rgb(0 0 0 / 0.15);
+  padding: 15px; background: var(--tint); border: 1px solid var(--edge-strong);
+  border-radius: 9px; margin: 20px 0; overflow-wrap: anywhere;
 }
-.approval .tool { margin-top: 8px; }
-.actions { display: flex; gap: 8px; margin-top: 10px; }
-.actions button {
-  flex: 1; font: inherit; border-radius: 8px; padding: 10px 6px;
-  border: 1px solid var(--border); background: var(--tool); color: var(--text);
+.approval h3 { font-size: 14px; margin-bottom: 7px; }
+.approval .sub { margin-bottom: 12px; }
+.approval .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+.approval .always { grid-column: 1 / -1; background: transparent; }
+.terminal-note { font-size: 10px; color: var(--muted); margin-top: 12px; }
+.err { color: var(--bad); font-size: 11px; line-height: 1.5; }
+#dock { position: sticky; bottom: 0; z-index: 1; width: 100%; max-width: 952px; margin: 0 auto; }
+#composer, .working {
+  background: var(--surface); border-top: 1px solid var(--border);
+  padding: 12px 16px max(12px, env(safe-area-inset-bottom));
+  box-shadow: 0 -5px 18px oklch(20% 0 0 / .035);
 }
-.actions .allow { background: var(--ok); border-color: var(--ok); color: #fff; }
-.actions .deny { color: var(--bad); }
-.actions button:disabled { opacity: 0.5; }
-.approval .err, #composer .err { color: var(--bad); font-size: 13px; margin-top: 6px; }
-#composer {
-  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
-  padding: 10px 12px; margin-top: 12px; box-shadow: 0 -4px 16px rgb(0 0 0 / 0.1);
+#composer blockquote {
+  margin: 0 0 9px; color: var(--muted); font-size: 11px; line-height: 1.5; overflow: hidden;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
 }
+#composer label { display: block; font-weight: 600; font-size: 13px; margin-bottom: 7px; }
 #composer textarea {
-  display: block; width: 100%; margin-top: 8px; resize: vertical; font: inherit;
-  color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px;
+  display: block; width: 100%; height: 64px; resize: none; font-size: 16px; line-height: 1.5;
+  border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--fg); padding: 10px 12px;
 }
+#composer[aria-busy=true] textarea { opacity: .7; }
+.composer-bottom { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px; font-size: 10px; color: var(--muted); }
+.working { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); padding-top: 16px; padding-bottom: max(16px, env(safe-area-inset-bottom)); }
 </style>
 </head>
 <body>
 <header>
-  <a id="back" href="#" aria-label="All sessions" hidden>‹</a>
-  <h1 id="heading">cc-proxy</h1>
-  <span id="total"></span>
-  <span id="dot" title="connecting" aria-hidden="true"></span>
-  <span id="connection" role="status">connecting</span>
+  <h1>cc-proxy</h1>
+  <div class="header-end">
+    <a id="elsewhere" hidden></a>
+    <span id="total"></span>
+    <span id="dot" title="connecting" aria-hidden="true"></span>
+    <span id="connection" role="status">connecting</span>
+  </div>
 </header>
 <main>
-  <div id="overview" class="meta" hidden>
-    <span id="overview-text"></span>
-    <button id="notify" type="button" hidden>Notify me</button>
-  </div>
-  <p id="empty">Waiting for Claude Code traffic…</p>
-  <nav id="sessions" aria-label="Sessions"></nav>
-  <div id="turns"></div>
-  <div id="dock">
+  <section id="gallery">
+    <div class="section-top">
+      <h2>Sessions</h2>
+      <button id="notify" type="button" hidden>Notify me</button>
+    </div>
+    <p id="overview-text"></p>
+    <div id="empty" class="empty">
+      <div class="empty-mark" aria-hidden="true">[ _ ]</div>
+      <h3>No sessions yet</h3>
+      <p>Start Claude Code through cc-proxy. Your sessions appear here automatically.</p>
+    </div>
+    <section id="orphans" aria-live="assertive"></section>
+    <nav id="sessions" aria-label="Sessions"></nav>
+  </section>
+  <section id="session" hidden>
+    <div class="session-heading">
+      <a id="back" href="#" aria-label="All sessions">←</a>
+      <div><h2 id="session-name"></h2><div id="session-sub" class="sub"></div></div>
+    </div>
+    <div id="waiting" class="waiting-banner" hidden>Waiting for your prompt <a id="focus-composer" href="#">Write a prompt ↓</a></div>
+    <div id="session-info" class="session-info"></div>
+    <div id="turns"></div>
     <section id="approvals" aria-live="assertive"></section>
-    <form id="composer" hidden>
-      <div class="meta"><span>Claude is waiting for your next prompt</span><span id="composer-cwd"></span></div>
-      <textarea id="prompt" rows="3" placeholder="Next prompt" aria-label="Next prompt" required></textarea>
-      <div class="actions"><button class="allow" type="submit">Send</button></div>
-      <div class="err"></div>
-    </form>
-  </div>
+    <p id="session-note" class="notice" hidden>Prompts can be sent when this session is waiting for one.</p>
+  </section>
 </main>
+<div id="dock" hidden>
+  <form id="composer" hidden>
+    <blockquote id="last-reply"></blockquote>
+    <label for="prompt">Send the next prompt</label>
+    <textarea id="prompt" placeholder="What should Claude do next?" required></textarea>
+    <div id="prompt-feedback" class="err" aria-live="polite"></div>
+    <div class="composer-bottom"><span>Sent to this session only</span><button class="primary" type="submit">Send prompt ↑</button></div>
+  </form>
+  <div id="working" class="working" role="status" hidden><span class="working-dot"></span>Claude is working…</div>
+</div>
 <script>
 "use strict";
 const turns = [];
 const sessions = new Map();
-const list = document.getElementById("turns");
-const sessionList = document.getElementById("sessions");
-const heading = document.getElementById("heading");
-const back = document.getElementById("back");
-let pending = [];
-const total = document.getElementById("total");
-const dot = document.getElementById("dot");
-const overview = document.getElementById("overview");
-const overviewText = document.getElementById("overview-text");
-const connection = document.getElementById("connection");
+const $ = id => document.getElementById(id);
+const gallery = $("gallery");
+const sessionView = $("session");
+const sessionList = $("sessions");
+const list = $("turns");
+const total = $("total");
+const dot = $("dot");
+const overviewText = $("overview-text");
+const connection = $("connection");
+const approvals = $("approvals");
+const orphans = $("orphans");
+const dock = $("dock");
+const composer = $("composer");
+const promptBox = $("prompt");
+const sendButton = composer.querySelector("button");
+const feedback = $("prompt-feedback");
 const FOLD = 600;
-const approvals = document.getElementById("approvals");
+// Long sessions show their latest turns; the rest open on request.
+const RECENT = 30;
 const seenApprovals = new Set();
-const composer = document.getElementById("composer");
-const promptBox = document.getElementById("prompt");
+// Each session keeps its own draft, sending flag and last failure, so a
+// reply that lands after the viewer moved on updates the right session.
+const prompts = new Map();
+const approvalCards = new Map();
+let pending = [];
 let idle = [];
+let connectionState = "connecting";
+let showAll = "";
+let galleryScroll = 0;
+let focusOnOpen = false;
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -165,9 +275,17 @@ function el(tag, className, text) {
 }
 
 function folded(className, text) {
-  if (text.length <= FOLD) return el("div", "block " + className, text);
-  const details = el("details", "block " + className);
-  details.append(el("summary", "", text.slice(0, 120).replace(/\s+/g, " ") + "…"), text);
+  if (text.length <= FOLD) return el("div", className, text);
+  const details = el("details");
+  details.append(el("summary", "", text.slice(0, 120).replace(/\s+/g, " ") + "…"), el("pre", "", text));
+  return details;
+}
+
+function disclosure(name, summary, body, className) {
+  const details = el("details", className);
+  const head = el("summary");
+  head.append(el("strong", "mono", name), el("span", "summary-input mono", summary));
+  details.append(head, el("pre", "", body));
   return details;
 }
 
@@ -187,40 +305,67 @@ function usd(value) {
   return "$" + value.toFixed(value < 1 ? 4 : 2);
 }
 
-function render(turn) {
-  const card = el("article", "turn");
-  const meta = el("div", "meta");
-  meta.append(el("span", "", "at " + new Date(turn.time).toLocaleTimeString()));
-  const message = turn.message;
-  if (message) {
-    const u = message.usage;
-    meta.append(
-      el("span", "", "model " + shortModel(message.model)),
-      el("span", "", (u.input_tokens + u.cache_creation_input_tokens + u.cache_read_input_tokens).toLocaleString() + " tokens in · " + u.output_tokens.toLocaleString() + " out"),
-    );
-    if (message.cost_usd !== undefined) meta.append(el("span", "", usd(message.cost_usd) + " spent"));
-    if (message.stop_reason) meta.append(el("span", "", "stop: " + message.stop_reason));
-  }
-  if (turn.status !== 200) meta.append(el("span", "err", "HTTP " + turn.status));
-  meta.append(el("span", "", "took " + (turn.duration_ms / 1000).toFixed(1) + " s"));
-  card.append(meta);
-
-  for (const block of turn.prompt || []) {
-    if (block.type === "text") card.append(folded("user", block.text));
-    else if (block.type === "tool_result") card.append(folded("result" + (block.is_error ? " error" : ""), block.text || "(no output)"));
-    else card.append(el("div", "block user", "[" + block.type + "]"));
-  }
-  for (const block of turn.reply || []) {
-    if (block.type === "text") card.append(folded("", block.text));
-    else {
-      const tool = el("div", "block tool");
-      tool.append(el("b", "", block.name), " " + toolSummary(block));
-      card.append(tool);
-    }
-  }
-  return card;
+function metric(label, value) {
+  const item = el("div", "", label);
+  item.append(el("strong", "", value));
+  return item;
 }
 
+function render(turn, number) {
+  const card = el("article", "turn");
+  const top = el("div", "turn-top");
+  const left = el("span", "", "Turn " + number);
+  if (turn.status !== 200) left.append(" · ", el("span", "err", "HTTP " + turn.status));
+  top.append(left, el("span", "", new Date(turn.time).toLocaleTimeString()));
+  card.append(top);
+
+  let role = "";
+  const label = name => {
+    if (role !== name) card.append(el("div", "role", name));
+    role = name;
+  };
+  for (const block of turn.prompt || []) {
+    if (block.type === "text") {
+      label("You");
+      card.append(folded("prompt-text", block.text));
+    } else if (block.type === "tool_result") {
+      label("Tool output");
+      const text = block.text || "(no output)";
+      card.append(disclosure(block.is_error ? "Error" : "Result", text.slice(0, 120).replace(/\s+/g, " "), text, block.is_error ? "error" : ""));
+    } else {
+      label("You");
+      card.append(el("p", "notice", "[" + block.type + "]"));
+    }
+  }
+  for (const block of turn.reply || []) {
+    label("Claude");
+    if (block.type === "text") card.append(folded("reply", block.text));
+    else card.append(disclosure(block.name, toolSummary(block), JSON.stringify(block.input || {}, null, 2)));
+  }
+
+  const details = el("details");
+  const message = turn.message;
+  const summary = el("summary", "", "Turn details");
+  summary.append(el("span", "summary-input",
+    "· " + (message && message.cost_usd !== undefined ? usd(message.cost_usd) + " · " : "") + (turn.duration_ms / 1000).toFixed(1) + " s"));
+  const metrics = el("div", "metrics");
+  if (message) {
+    const u = message.usage;
+    metrics.append(
+      metric("Model", shortModel(message.model)),
+      metric("Input tokens", u.input_tokens.toLocaleString()),
+      metric("Output tokens", u.output_tokens.toLocaleString()),
+      metric("Cache read", u.cache_read_input_tokens.toLocaleString()),
+      metric("Cache write", u.cache_creation_input_tokens.toLocaleString()),
+    );
+    if (message.cost_usd !== undefined) metrics.append(metric("Turn cost", usd(message.cost_usd)));
+    if (message.stop_reason) metrics.append(metric("Stop reason", message.stop_reason));
+  }
+  metrics.append(metric("Latency", (turn.duration_ms / 1000).toFixed(1) + " s"));
+  details.append(summary, metrics);
+  card.append(details);
+  return card;
+}
 function selectedSession() {
   const match = location.hash.match(/^#s=(.+)$/);
   return match ? decodeURIComponent(match[1]) : "";
@@ -274,21 +419,43 @@ function status(session) {
   return { label: "Idle", kind: "" };
 }
 
+function badge(state) {
+  const node = el("span", "badge " + state.kind);
+  if (state.kind === "working") node.append(el("span", "working-dot"));
+  node.append(state.label);
+  return node;
+}
+
+function waitingFor(id) {
+  return idle.find(entry => entry.session_id === id);
+}
+
 function renderSession(session) {
   const state = status(session);
   const card = el("a", "session" + (state.kind === "attention" ? " attention" : ""));
   card.href = "#s=" + encodeURIComponent(session.id);
-  const top = el("div", "top");
-  top.append(el("span", "project", project(session)), el("span", "badge " + state.kind, state.label));
-  card.append(top, el("div", "title" + (session.title ? "" : " none"), session.title || "No prompt yet"));
-  const meta = el("div", "meta");
-  meta.append(el("span", "", "active " + ago(session.last)));
+  const top = el("div", "card-top");
+  const chevron = el("span", "chevron", "›");
+  chevron.setAttribute("aria-hidden", "true");
+  top.append(el("span", "card-label", project(session)), chevron);
+  card.append(top, el("div", "card-title" + (session.title ? "" : " none"), session.title || "No prompt yet"));
+  if (session.user) card.append(el("div", "account", "Account · " + session.user));
+  const line = el("div", "status-line");
+  line.append(badge(state), "active " + ago(session.last));
+  const meta = el("div", "card-meta");
   if (session.turns) meta.append(el("span", "", session.turns + (session.turns === 1 ? " turn" : " turns")));
   if (session.cost) meta.append(el("span", "", usd(session.cost) + " spent"));
   if (session.model) meta.append(el("span", "", "model " + shortModel(session.model)));
-  if (session.user) meta.append(el("span", "", "account " + session.user));
-  meta.append(el("span", "", "session " + session.id.slice(0, 8)));
-  card.append(meta);
+  card.append(line, meta, el("div", "card-foot mono", "session " + session.id.slice(0, 8)));
+  if (waitingFor(session.id)) {
+    card.append(el("span", "card-action", "Reply →"));
+    card.onclick = event => {
+      // A modified click opens another tab and no hashchange follows here.
+      if (event.button === 0 && !event.ctrlKey && !event.metaKey && !event.shiftKey) focusOnOpen = true;
+    };
+  } else if (pending.some(request => request.session_id === session.id)) {
+    card.append(el("span", "card-action", "Review request →"));
+  }
   card.title = [session.remote, session.cwd].filter(Boolean).join("\n");
   return card;
 }
@@ -298,60 +465,189 @@ function showSessions() {
   const urgent = session => status(session).kind === "attention" ? 1 : 0;
   all.sort((a, b) => urgent(b) - urgent(a) || new Date(b.last) - new Date(a.last));
   sessionList.replaceChildren(...all.map(renderSession));
-  const cost = all.reduce((sum, session) => sum + session.cost, 0);
-  total.textContent = all.length ? usd(cost) + " total" : "";
-  overview.hidden = !all.length && notifyButton.hidden;
   overviewText.textContent = !all.length ? "" : (all.length === 1 ? "1 session" : all.length + " sessions") +
     " · those waiting on you first, then by last activity";
-  document.getElementById("empty").hidden = all.length > 0;
+  $("empty").hidden = all.length > 0;
+}
+
+function sessionTurns(id) {
+  return turns.filter(turn => turn.session_id === id);
+}
+
+function showSessionHeader(id) {
+  const session = sessions.get(id);
+  const shown = sessionTurns(id);
+  $("session-name").textContent = session ? project(session) : "Session " + id.slice(0, 8);
+  $("session-sub").textContent = ["session " + id.slice(0, 8), shown.length + (shown.length === 1 ? " turn" : " turns"),
+    session && session.cost ? usd(session.cost) + " spent" : ""].filter(Boolean).join(" · ");
+  const info = $("session-info");
+  info.replaceChildren();
+  if (session && session.title) info.append(el("div", "", session.title));
+  if (session && session.user) info.append(el("div", "", "Account · " + session.user));
+  if (session) {
+    const line = el("div", "status-line");
+    line.append(badge(status(session)));
+    if (session.model) line.append("model " + shortModel(session.model));
+    info.append(line);
+  }
+}
+
+// showTimeline rebuilds the session's turns; new turns are appended
+// instead, so open disclosures stay open.
+function historyButton(id, count) {
+  const older = el("button", "history", "Show " + count + (count === 1 ? " earlier turn" : " earlier turns"));
+  older.type = "button";
+  older.onclick = () => { showAll = id; redraw(); };
+  return older;
+}
+
+// appendTurn adds a live turn to the open timeline, keeping the window of
+// the latest turns unless the viewer asked for all of them.
+function appendTurn(id, turn) {
+  const count = sessionTurns(id).length;
+  list.append(render(turn, count));
+  const shown = list.querySelectorAll(".turn");
+  if (showAll === id || shown.length <= RECENT) return;
+  // Keep the text being read in place where the browser does not anchor
+  // the scroll position itself (Safari).
+  const top = shown[1].getBoundingClientRect().top;
+  shown[0].remove();
+  const button = historyButton(id, count - RECENT);
+  const old = list.querySelector(".history");
+  if (old) old.replaceWith(button);
+  else list.prepend(button);
+  window.scrollBy(0, shown[1].getBoundingClientRect().top - top);
+}
+
+function showTimeline(id) {
+  const shown = sessionTurns(id);
+  const nodes = [];
+  const first = showAll === id ? 0 : Math.max(0, shown.length - RECENT);
+  if (first) nodes.push(historyButton(id, first));
+  for (let i = first; i < shown.length; i++) nodes.push(render(shown[i], i + 1));
+  if (backlog) {
+    nodes.push(el("p", "notice", "Loading…"));
+  } else if (!shown.length && connectionState !== "live") {
+    nodes.push(el("p", "notice", "Not connected yet."));
+  } else if (!shown.length) {
+    const empty = el("div", "empty");
+    empty.append(el("h3", "", "No turns yet"), el("p", "", "This session is connected, but no exchange has been recorded yet."));
+    nodes.push(empty);
+  }
+  list.replaceChildren(...nodes);
+}
+
+// refresh updates the totals, the gallery or the open session's heading,
+// and the dock, leaving the timeline and the approval cards alone.
+function refresh() {
+  const id = selectedSession();
+  const all = [...sessions.values()];
+  total.textContent = all.length ? usd(all.reduce((sum, session) => sum + session.cost, 0)) + " total" : "";
+  if (id) showSessionHeader(id);
+  else showSessions();
+  // In a session view, approvals of other sessions show only as this link.
+  const elsewhere = id ? pending.filter(request => request.session_id !== id) : [];
+  const link = $("elsewhere");
+  link.hidden = !elsewhere.length;
+  if (elsewhere.length) {
+    link.textContent = elsewhere.length === 1 ? "1 request elsewhere" : elsewhere.length + " requests elsewhere";
+    // A request from an unknown session is shown on the gallery.
+    const target = elsewhere[0].session_id;
+    link.href = sessions.has(target) ? "#s=" + encodeURIComponent(target) : "#";
+  }
+  showDock();
 }
 
 function redraw() {
   const id = selectedSession();
-  const session = sessions.get(id);
-  back.hidden = !id;
-  sessionList.hidden = !!id;
-  overview.hidden = !!id;
-  list.hidden = !id;
-  if (!id) {
-    heading.textContent = "cc-proxy";
-    list.replaceChildren();
-    showSessions();
-  } else {
-    heading.textContent = session ? project(session) + (session.title ? " · " + session.title : "") : "Session " + id.slice(0, 8);
-    const shown = turns.filter(turn => turn.session_id === id);
-    list.replaceChildren(...shown.map(render));
-    total.textContent = session && session.cost ? usd(session.cost) + " spent" : "";
-    document.getElementById("empty").hidden = shown.length > 0;
-  }
-  showComposer();
+  gallery.hidden = !!id;
+  sessionView.hidden = !id;
+  if (id) showTimeline(id);
+  showApprovals();
+  refresh();
 }
 
-function showComposer() {
-  const waiting = idle.find(session => session.session_id === selectedSession());
+// lastReply is the end of Claude's last message in the session, quoted
+// above the prompt box.
+function lastReply(id) {
+  for (let i = turns.length - 1; i >= 0; i--) {
+    if (turns[i].session_id !== id) continue;
+    const texts = (turns[i].reply || []).filter(block => block.type === "text" && block.text.trim());
+    if (texts.length) return texts.at(-1).text.trim().split(/[.!?]\s+/).at(-1);
+  }
+  return "";
+}
+
+function promptState(id) {
+  if (!prompts.has(id)) prompts.set(id, { text: "", sending: false, error: "", wait: "" });
+  return prompts.get(id);
+}
+
+let dockSession = "";
+
+function showDock() {
+  const id = selectedSession();
+  const session = sessions.get(id);
+  const waiting = id ? waitingFor(id) : undefined;
+  const working = !waiting && session && status(session).kind === "working";
+  const state = promptState(id);
+  if (id !== dockSession) {
+    dockSession = id;
+    promptBox.value = state.text;
+  }
+  dock.hidden = !waiting && !working;
   composer.hidden = !waiting;
-  document.getElementById("composer-cwd").textContent = waiting ? waiting.cwd || "" : "";
+  $("working").hidden = !working;
+  $("waiting").hidden = !waiting;
+  $("session-note").hidden = !session || !!waiting || status(session).label !== "Idle";
+  if (!waiting) return;
+  // An error belongs to the wait it happened in.
+  if (state.wait !== waiting.time) {
+    state.wait = waiting.time;
+    state.error = "";
+  }
+  const reply = lastReply(id);
+  $("last-reply").textContent = reply ? "Claude: " + reply : "";
+  $("last-reply").hidden = !reply;
+  const live = connectionState === "live";
+  promptBox.disabled = !live;
+  promptBox.readOnly = state.sending;
+  composer.setAttribute("aria-busy", String(state.sending));
+  sendButton.disabled = !live || state.sending || !state.text.trim();
+  sendButton.textContent = state.sending ? "Sending…" : "Send prompt ↑";
+  feedback.textContent = state.error ? "Not sent: " + state.error
+    : connectionState === "offline" ? "Offline. Reload to sign in again before sending."
+    : !live ? "Reconnecting. You can send once the feed is live." : "";
+}
+
+function focusComposer() {
+  if (!composer.hidden && !promptBox.disabled) promptBox.focus({ preventScroll: true });
 }
 
 async function sendPrompt(event) {
   event.preventDefault();
   const session = selectedSession();
-  const button = composer.querySelector("button");
-  const error = composer.querySelector(".err");
-  button.disabled = true;
-  error.textContent = "";
+  const state = promptState(session);
+  // Ctrl+Enter submits even while the button is disabled.
+  const waiting = waitingFor(session);
+  if (state.sending || !state.text.trim() || connectionState !== "live" || !waiting) return;
+  state.sending = true;
+  state.error = "";
+  showDock();
   try {
     const response = await fetch("prompts/" + encodeURIComponent(session), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt: promptBox.value }),
+      body: JSON.stringify({ prompt: state.text }),
     });
     if (!response.ok) throw new Error((await response.text()).trim() || "HTTP " + response.status);
-    promptBox.value = "";
+    state.text = "";
+    if (selectedSession() === session) promptBox.value = "";
   } catch (failure) {
-    error.textContent = failure.message;
+    if (waitingFor(session)?.time === waiting.time) state.error = failure.message;
   } finally {
-    button.disabled = false;
+    state.sending = false;
+    showDock();
   }
 }
 
@@ -399,41 +695,52 @@ async function decide(card, id, behavior, always) {
   }
 }
 
+// approvalCard reuses a request's card while it is pending, so a click in
+// flight keeps its disabled buttons and its error line.
+function approvalCard(request) {
+  if (!approvalCards.has(request.id)) approvalCards.set(request.id, renderApproval(request));
+  return approvalCards.get(request.id);
+}
+
 function renderApproval(request) {
   const card = el("article", "approval");
-  const meta = el("div", "meta");
-  meta.append(el("span", "", new Date(request.time).toLocaleTimeString()));
-  const session = sessions.get(request.session_id);
-  if (session) meta.append(el("span", "", project(session)));
-  else if (request.session_id) meta.append(el("span", "", request.session_id.slice(0, 8)));
-  if (request.cwd) meta.append(el("span", "", request.cwd));
-  const tool = el("div", "block tool");
-  tool.append(el("b", "", request.tool_name), " " + toolSummary({ input: request.tool_input }));
-  const input = el("details", "block");
-  input.append(el("summary", "", "Full input"), el("div", "block result", JSON.stringify(request.tool_input, null, 2)));
+  card.append(el("h3", "", "Approval needed"));
+  const sub = [new Date(request.time).toLocaleTimeString()];
+  if (request.cwd) sub.push(request.cwd);
+  card.append(el("div", "sub", sub.filter(Boolean).join(" · ")));
+  const tool = el("pre");
+  tool.append(el("strong", "", request.tool_name), "\n" + toolSummary({ input: request.tool_input }));
+  const input = el("details");
+  input.append(el("summary", "", "Full input"), el("pre", "", JSON.stringify(request.tool_input, null, 2)));
   const actions = el("div", "actions");
-  const deny = el("button", "deny", "Deny");
-  deny.onclick = () => decide(card, request.id, "deny", false);
-  const allow = el("button", "allow", "Allow");
+  const allow = el("button", "primary", "Allow");
   allow.onclick = () => decide(card, request.id, "allow", false);
-  actions.append(deny, allow);
+  const deny = el("button", "danger", "Deny");
+  deny.onclick = () => decide(card, request.id, "deny", false);
+  actions.append(allow, deny);
   const rules = (request.always || []).map(ruleText).filter(Boolean).join(", ");
   if (rules) {
-    const always = el("button", "", "Always allow");
-    always.title = rules;
+    const always = el("button", "always", "Always allow " + rules);
     always.onclick = () => decide(card, request.id, "allow", true);
     actions.append(always);
   }
-  card.append(meta, tool, input, actions, el("div", "err"));
+  card.append(tool, input, actions, el("p", "terminal-note", "The terminal can answer first; this request then disappears."), el("div", "err"));
   return card;
 }
 
+// showApprovals puts each request in its session's view; requests whose
+// session is unknown stay on the gallery.
 function showApprovals() {
-  approvals.replaceChildren(...pending.map(renderApproval));
+  const id = selectedSession();
+  const ids = new Set(pending.map(request => request.id));
+  for (const key of approvalCards.keys()) if (!ids.has(key)) approvalCards.delete(key);
+  approvals.replaceChildren(...pending.filter(request => id && request.session_id === id).map(approvalCard));
+  orphans.replaceChildren(...pending.filter(request => !sessions.has(request.session_id)).map(approvalCard));
   document.title = pending.length ? "(" + pending.length + ") cc-proxy" : "cc-proxy feed";
-  if (pending.some(request => !seenApprovals.has(request.id))) {
+  const fresh = pending.filter(request => !seenApprovals.has(request.id));
+  if (fresh.length) {
     if (navigator.vibrate) navigator.vibrate(200);
-    window.scrollTo(0, document.body.scrollHeight);
+    if (fresh.some(request => request.session_id === id)) window.scrollTo(0, document.body.scrollHeight);
   }
   pending.forEach(request => seenApprovals.add(request.id));
 }
@@ -493,15 +800,38 @@ async function setUpNotifications() {
 }
 
 setUpNotifications().catch(() => {});
-window.addEventListener("hashchange", () => { redraw(); window.scrollTo(0, selectedSession() ? document.body.scrollHeight : 0); });
-setInterval(() => { if (!selectedSession()) showSessions(); }, 30000);
+// The gallery keeps its scroll position while a session is open; a
+// session opens at its latest turn.
+let shownSession = selectedSession();
+window.addEventListener("hashchange", () => {
+  if (!shownSession) galleryScroll = window.scrollY;
+  if (selectedSession() !== shownSession) showAll = "";
+  shownSession = selectedSession();
+  redraw();
+  window.scrollTo(0, shownSession ? document.body.scrollHeight : galleryScroll);
+  if (focusOnOpen) focusComposer();
+  focusOnOpen = false;
+});
+setInterval(refresh, 30000);
 composer.addEventListener("submit", sendPrompt);
+promptBox.addEventListener("input", () => {
+  const state = promptState(selectedSession());
+  state.text = promptBox.value;
+  state.error = "";
+  showDock();
+});
+$("focus-composer").addEventListener("click", event => {
+  event.preventDefault();
+  focusComposer();
+});
 promptBox.addEventListener("keydown", event => {
-  if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) composer.requestSubmit();
+  if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) sendPrompt(event);
 });
 
 const nearBottom = () => window.innerHeight + window.scrollY >= document.body.scrollHeight - 80;
 function setConnection(state) {
+  connectionState = state;
+  showDock();
   dot.className = state === "live" ? "live" : "";
   dot.title = state;
   // Screen readers still hear "live" from the status text.
@@ -528,12 +858,21 @@ function setConnection(state) {
 // is not rebuilt. The login probe can use any guarded path: the auth guard
 // answers 401 before push/key's own handler runs.
 let events;
+// A stream starts with a backlog of turns, then the states; the open
+// timeline is built once the backlog is in.
+let backlog = true;
 let retryDelay = 2000;
 // The scroll position to restore once a replay ends, or null.
 let replayScroll = null;
 
 async function retryClosed() {
   setConnection("reconnecting");
+  // A closed stream sends no more backlog.
+  if (backlog) {
+    backlog = false;
+    const id = selectedSession();
+    if (id) showTimeline(id);
+  }
   const timeout = new AbortController();
   setTimeout(() => timeout.abort(), 10000);
   const probe = { cache: "no-store", signal: timeout.signal };
@@ -546,7 +885,10 @@ async function retryClosed() {
   retryDelay = Math.min(retryDelay * 2, 30000);
 }
 
+// A stream the browser resumes by itself sends only the turns after the
+// last one seen, so only a new stream starts a backlog.
 function connect(replay) {
+  backlog = true;
   events = new EventSource("events");
   events.onopen = () => {
     if (replay) {
@@ -570,16 +912,20 @@ function connect(replay) {
     pending = JSON.parse(event.data);
     pending.forEach(request => track(request, false));
     showApprovals();
-    if (!selectedSession()) showSessions();
+    refresh();
   });
   events.addEventListener("idle", event => {
     idle = JSON.parse(event.data);
     idle.forEach(entry => track(entry, false));
-    if (!selectedSession()) showSessions();
-    showComposer();
-    // The states follow the turns, and idle sorts last, so it ends a replay.
-    if (replayScroll !== null) {
-      window.scrollTo(0, replayScroll);
+    refresh();
+    // The states follow the turns, and idle sorts last, so it ends the
+    // backlog.
+    if (backlog) {
+      backlog = false;
+      const id = selectedSession();
+      if (id) showTimeline(id);
+      if (replayScroll !== null) window.scrollTo(0, replayScroll);
+      else if (id) window.scrollTo(0, document.body.scrollHeight);
       replayScroll = null;
     }
   });
@@ -587,14 +933,23 @@ function connect(replay) {
     const turn = JSON.parse(event.data);
     if (turn.backfill) {
       track(turn, false);
-      if (!selectedSession()) showSessions();
+      refresh();
       return;
     }
-    const follow = replayScroll === null && nearBottom();
     turns.push(turn);
     track(turn, true);
-    redraw();
-    if (follow && selectedSession()) window.scrollTo(0, document.body.scrollHeight);
+    if (backlog) {
+      refresh();
+      return;
+    }
+    const follow = nearBottom();
+    const id = selectedSession();
+    if (id === turn.session_id) {
+      if (list.querySelector(".turn")) appendTurn(id, turn);
+      else showTimeline(id);
+    }
+    refresh();
+    if (follow && id) window.scrollTo(0, document.body.scrollHeight);
   });
 }
 
